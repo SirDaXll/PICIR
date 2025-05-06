@@ -4,7 +4,7 @@ CREATE TABLE hosts_puertos (
     host TEXT NOT NULL,
     protocolo TEXT NOT NULL,
     puerto INTEGER NOT NULL,
-    estado TEXT, -- (opcional) ej: open, closed, filtered
-    servicio TEXT, -- (opcional) ej: http, ssh, etc.
-    version TEXT -- (opcional) si Nmap detecta la versión del servicio
+    estado TEXT,
+    servicio TEXT,
+    version TEXT
 );
