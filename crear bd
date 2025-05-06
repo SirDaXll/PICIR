@@ -1,0 +1,10 @@
+CREATE TABLE hosts_puertos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
+    host TEXT NOT NULL,
+    protocolo TEXT NOT NULL,
+    puerto INTEGER NOT NULL,
+    estado TEXT, -- (opcional) ej: open, closed, filtered
+    servicio TEXT, -- (opcional) ej: http, ssh, etc.
+    version TEXT -- (opcional) si Nmap detecta la versión del servicio
+);
