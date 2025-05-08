@@ -3,7 +3,7 @@ import nmap
 from datetime import datetime
 from collections import Counter
 
-# Constantes
+# Constantes.
 DB_NAME = "hosts_puertos.db"
 DEFAULT_TARGET = "scanme.nmap.org"
 
@@ -40,22 +40,22 @@ def procesar_resultados(scanner, conn, fecha_hora):
                 estado = scanner[host][proto][port]['state']
                 servicio = scanner[host][proto][port].get('name', 'desconocido')
                 
-                # Obtener la versión para la base de datos y para mostrar al usuario
-                version_db = scanner[host][proto][port].get('version', '')  # Vacío para la base de datos
-                version_display = version_db if version_db else "desconocida"  # "desconocida" para el usuario
+                # Obtener la versión para la base de datos y para mostrar al usuario.
+                version_db = scanner[host][proto][port].get('version', '')  # Vacío para la base de datos.
+                version_display = version_db if version_db else "desconocida"  # "desconocida" para el usuario.
 
-                # Mostrar resultados al usuario
+                # Mostrar resultados al usuario.
                 print(f"  - [{proto.upper()}] Puerto {port}: {estado}, Servicio: {servicio}, Versión: {version_display}")
 
-                # Guardar en la base de datos
+                # Guardar en la base de datos.
                 guardar_resultados(cursor, fecha_hora, host, proto, port, estado, servicio, version_db)
 
-                # Contar el estado del puerto
+                # Contar el estado del puerto.
                 estado_puertos[estado] += 1
 
     return estado_puertos
 
-# Muestra un resumen del escaneo
+# Muestra un resumen del escaneo.
 def mostrar_resumen(estado_puertos):
     print("\nResumen del escaneo:")
     total = sum(estado_puertos.values())
@@ -63,25 +63,25 @@ def mostrar_resumen(estado_puertos):
         print(f" - {estado.title()}: {cantidad}")
     print(f" Total de puertos escaneados: {total}")
 
-# Inicializar el escáner
+# Inicializar el escáner.
 def main():
     scanner = nmap.PortScanner()
     target = obtener_target()
 
     try:
-        # Realizar el escaneo
+        # Realizar el escaneo.
         resultados = realizar_escaneo(scanner, target)
         if not resultados:
             return
 
-        # Obtener fecha y hora actual
+        # Obtener fecha y hora actual.
         fecha_hora = datetime.now().isoformat(sep=' ', timespec='seconds')
 
-        # Conectar a la base de datos
+        # Conectar a la base de datos.
         with sqlite3.connect(DB_NAME) as conn:
             estado_puertos = procesar_resultados(resultados, conn, fecha_hora)
 
-        # Mostrar resumen
+        # Mostrar resumen.
         mostrar_resumen(estado_puertos)
         print("\n✅ Datos guardados en la base de datos.")
 
