@@ -1,0 +1,15 @@
+[project]
+name = "picir"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pyside6>=6.9.0",
+    "python-nmap>=0.7.1",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.8",
+]
