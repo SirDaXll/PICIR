@@ -6,5 +6,7 @@ CREATE TABLE hosts_puertos (
     puerto INTEGER NOT NULL,
     estado TEXT,
     servicio TEXT,
-    version TEXT
+    version TEXT,
+    cve TEXT,
+    descripcion TEXT
 );

@@ -41,6 +41,7 @@ class MainWindow(QMainWindow):
     # Inicia el escaneo y procesa los resultados
     def beginScan(self):
         target = self.targetInput.text().strip() or DEFAULT_TARGET
+        #options = "-sS -sV -O -A -p 1-1000"
         self.resultArea.append(f"Iniciando escaneo para: {target}")
 
         try:
@@ -89,6 +90,8 @@ class MainWindow(QMainWindow):
                 portState[state] += 1
 
     # Guarda un registro en la base de datos
+    # Agregar el campo 'CVE' en caso de que se detecte una vulnerabilidad
+    # Agregar un campo con la 'descripcion' de la vulnerabilidad
     def dbSave(self, cursor, timestamp, host, protocol, port, state, service, version):
         cursor.execute("""
             INSERT INTO hosts_puertos (fecha_hora, host, protocolo, puerto, estado, servicio, version)
