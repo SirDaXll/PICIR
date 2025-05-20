@@ -1,12 +1,27 @@
-CREATE TABLE hosts_puertos (
+CREATE TABLE escaneos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
     host TEXT NOT NULL,
+    comando TEXT NOT NULL,
+    sistema_operativo TEXT
+);
+
+CREATE TABLE puertos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    escaneo_id INTEGER NOT NULL,
     protocolo TEXT NOT NULL,
     puerto INTEGER NOT NULL,
     estado TEXT,
     servicio TEXT,
     version TEXT,
-    cve TEXT,
-    descripcion TEXT
+    FOREIGN KEY (escaneo_id) REFERENCES escaneos(id)
+);
+
+CREATE TABLE vulnerabilidades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    puerto_id INTEGER NOT NULL,
+    cve TEXT NOT NULL,
+    explotable BOOLEAN,
+    descripcion TEXT,
+    FOREIGN KEY (puerto_id) REFERENCES puertos(id)
 );

@@ -20,7 +20,7 @@ class MainWindow(QMainWindow):
 
         # Campo para ingresar el target
         self.targetInput = QLineEdit(self)
-        self.targetInput.setPlaceholderText("Ingrese la IP o nombre del host (Deje vacío para usar scanme.nmap.org)")
+        self.targetInput.setPlaceholderText("Ingrese la IP o nombre del host (Por defecto se utiliza scanme.nmap.org)")
         layout.addWidget(self.targetInput)
 
         # Botón para iniciar el escaneo
@@ -41,12 +41,14 @@ class MainWindow(QMainWindow):
     # Inicia el escaneo y procesa los resultados
     def beginScan(self):
         target = self.targetInput.text().strip() or DEFAULT_TARGET
-        #options = "-sS -sV -O -A -p 1-1000"
+        # Argumentos para el escaneo de servicios y su versión, detección de sistema operativo, escaneo en alta velocidad y el script para vulnerabilidades
+        options = "-sV -O -T5 --script vulners"
         self.resultArea.append(f"Iniciando escaneo para: {target}")
+        self.resultArea.append(f"Argumentos de Nmap: {options}")
 
         try:
             scanner = nmap.PortScanner()
-            scanner.scan(target)
+            scanner.scan(target, arguments=options)
 
             if not scanner.all_hosts():
                 self.resultArea.append("No se encontraron hosts en el escaneo.")
@@ -58,7 +60,23 @@ class MainWindow(QMainWindow):
             with sqlite3.connect(DB_NAME) as conn:
                 cursor = conn.cursor()
                 for host in scanner.all_hosts():
-                    self.procesar_host(scanner, host, cursor, timestamp, portState)
+                    # Obtener sistema operativo
+                    if 'osmatch' in scanner[host] and scanner[host]['osmatch']:
+                        os_info = scanner[host]['osmatch'][0]
+                        os_name = os_info.get('name', 'Desconocido')
+                    else:
+                        os_name = None
+
+                    # Insertar en escaneos y obtener escaneo_id
+                    cursor.execute("""
+                        INSERT INTO escaneos (fecha_hora, host, comando, sistema_operativo)
+                        VALUES (?, ?, ?, ?)
+                    """, (timestamp, host, options, os_name))
+                    escaneo_id = cursor.lastrowid
+
+                    self.procesar_host(scanner, host, cursor, escaneo_id, portState)
+
+                conn.commit()
 
             self.summary(portState)
             self.resultArea.append("\n✅ Datos guardados en la base de datos.")
@@ -71,32 +89,76 @@ class MainWindow(QMainWindow):
             self.resultArea.append(f"❌ Error inesperado: {e}")
 
     # Procesa un host escaneado y guarda los datos en la base de datos
-    def procesar_host(self, scanner, host, cursor, timestamp, portState):
+    def procesar_host(self, scanner, host, cursor, escaneo_id, portState):
         self.resultArea.append(f"\nResultados para: {host}")
+
+        # Mostrar información del sistema operativo si está disponible
+        if 'osmatch' in scanner[host] and scanner[host]['osmatch']:
+            os_info = scanner[host]['osmatch'][0]
+            os_name = os_info.get('name', 'Desconocido')
+            os_accuracy = os_info.get('accuracy', '0')
+            self.resultArea.append(f" ➤ Sistema operativo detectado: {os_name} (Precisión: {os_accuracy}%)")
+        else:
+            self.resultArea.append(" ➤ Sistema operativo: No detectado.")
+
+        # Espacio para mostrar resultados del script "vulners"
+        vuln_info = ""
+        
+        # Mostrar información avanzada (-A)
+        #advanced_info = ""
+
+        # Scripts NSE por puerto
         for proto in scanner[host].all_protocols():
             ports = scanner[host][proto].keys()
             for port in ports:
-                state = scanner[host][proto][port]['state']
-                service = scanner[host][proto][port].get('name', 'desconocido')
-                version = scanner[host][proto][port].get('version', '')
+                port_data = scanner[host][proto][port]
+                state = port_data['state']
+                service = port_data.get('name', 'desconocido')
+                version = port_data.get('version', '')
 
                 # Mostrar resultados
                 self.resultArea.append(f"  - [{proto.upper()}] Puerto {port}: {state}, Servicio: {service}, Versión: {version or 'desconocida'}")
 
-                # Guardar en la base de datos
-                self.dbSave(cursor, timestamp, host, proto.upper(), port, state, service, version)
+                # Guardar puerto y obtener puerto_id
+                cursor.execute("""
+                    INSERT INTO puertos (escaneo_id, protocolo, puerto, estado, servicio, version)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (escaneo_id, proto.upper(), port, state, service, version))
+                puerto_id = cursor.lastrowid
 
-                # Contar el state del puerto
+                # Guardar vulnerabilidades si existen
+                if 'script' in port_data and 'vulners' in port_data['script']:
+                    vuln_output = port_data['script']['vulners']
+                    vuln_info += f"\n[VULN] Puerto {port}:\n{vuln_output}\n"
+                    # Extraer CVEs del output (simplemente busca líneas que empiecen con CVE-)
+                    for line in vuln_output.splitlines():
+                        if line.startswith("CVE-"):
+                            parts = line.split()
+                            cve = parts[0]
+                            descripcion = " ".join(parts[1:]) if len(parts) > 1 else ""
+                            cursor.execute("""
+                                INSERT INTO vulnerabilidades (puerto_id, cve, explotable, descripcion)
+                                VALUES (?, ?, ?, ?)
+                            """, (puerto_id, cve, None, descripcion))
+
                 portState[state] += 1
 
-    # Guarda un registro en la base de datos
-    # Agregar el campo 'CVE' en caso de que se detecte una vulnerabilidad
-    # Agregar un campo con la 'descripcion' de la vulnerabilidad
-    def dbSave(self, cursor, timestamp, host, protocol, port, state, service, version):
-        cursor.execute("""
-            INSERT INTO hosts_puertos (fecha_hora, host, protocolo, puerto, estado, servicio, version)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (timestamp, host, protocol, port, state, service, version))
+        if vuln_info:
+            self.resultArea.append("\n[Resultados del script 'vulners']" + vuln_info)
+
+                # Mostrar scripts NSE si existen
+                #if 'script' in port_data:
+                #    for script_name, script_output in port_data['script'].items():
+                #        advanced_info += f"    [NSE] {script_name}: {script_output}\n"
+
+        # Traceroute si existe
+        #if 'traceroute' in scanner[host]:
+        #    advanced_info += "  ➤ Traceroute:\n"
+        #    for hop in scanner[host]['traceroute']['hop']:
+        #        advanced_info += f"    Hop {hop['ttl']}: {hop['ipaddr']} ({hop.get('rtt', 'N/A')} ms)\n"
+
+        #if advanced_info:
+        #    self.resultArea.append("\n[Información avanzada -A]\n" + advanced_info)
 
     # Muestra un resumen del escaneo
     def summary(self, portState):
