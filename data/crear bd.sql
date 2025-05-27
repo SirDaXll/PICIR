@@ -20,8 +20,9 @@ CREATE TABLE puertos (
 CREATE TABLE vulnerabilidades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     puerto_id INTEGER NOT NULL,
-    cve TEXT NOT NULL,
+    id_vulnerabilidad TEXT NOT NULL,
     explotable BOOLEAN,
+    cvss REAL,
     descripcion TEXT,
     FOREIGN KEY (puerto_id) REFERENCES puertos(id)
 );

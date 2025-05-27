@@ -51,7 +51,7 @@ class MainWindow(QMainWindow):
             scanner.scan(target, arguments=options)
 
             if not scanner.all_hosts():
-                self.resultArea.append("No se encontraron hosts en el escaneo.")
+                self.resultArea.append("❌ No se encontraron hosts en el escaneo.\n")
                 return
 
             timestamp = datetime.now().isoformat(sep=' ', timespec='seconds')
@@ -62,24 +62,24 @@ class MainWindow(QMainWindow):
                 for host in scanner.all_hosts():
                     # Obtener sistema operativo
                     if 'osmatch' in scanner[host] and scanner[host]['osmatch']:
-                        os_info = scanner[host]['osmatch'][0]
-                        os_name = os_info.get('name', 'Desconocido')
+                        osInfo = scanner[host]['osmatch'][0]
+                        osName = osInfo.get('name', 'Desconocido')
                     else:
-                        os_name = None
+                        osName = None
 
                     # Insertar en escaneos y obtener escaneo_id
                     cursor.execute("""
                         INSERT INTO escaneos (fecha_hora, host, comando, sistema_operativo)
                         VALUES (?, ?, ?, ?)
-                    """, (timestamp, host, options, os_name))
-                    escaneo_id = cursor.lastrowid
+                    """, (timestamp, host, options, osName))
+                    escaneoId = cursor.lastrowid
 
-                    self.procesar_host(scanner, host, cursor, escaneo_id, portState)
+                    self.procesarHost(scanner, host, cursor, escaneoId, portState)
 
                 conn.commit()
 
             self.summary(portState)
-            self.resultArea.append("\n✅ Datos guardados en la base de datos.")
+            self.resultArea.append("✅ Datos guardados en la base de datos.")
 
         except nmap.PortScannerError as e:
             self.resultArea.append(f"❌ Error al inicializar el escáner: {e}")
@@ -89,20 +89,20 @@ class MainWindow(QMainWindow):
             self.resultArea.append(f"❌ Error inesperado: {e}")
 
     # Procesa un host escaneado y guarda los datos en la base de datos
-    def procesar_host(self, scanner, host, cursor, escaneo_id, portState):
+    def procesarHost(self, scanner, host, cursor, escaneoId, portState):
         self.resultArea.append(f"\nResultados para: {host}")
 
         # Mostrar información del sistema operativo si está disponible
         if 'osmatch' in scanner[host] and scanner[host]['osmatch']:
-            os_info = scanner[host]['osmatch'][0]
-            os_name = os_info.get('name', 'Desconocido')
-            os_accuracy = os_info.get('accuracy', '0')
-            self.resultArea.append(f" ➤ Sistema operativo detectado: {os_name} (Precisión: {os_accuracy}%)")
+            osInfo = scanner[host]['osmatch'][0]
+            osName = osInfo.get('name', 'Desconocido')
+            osAccuracy = osInfo.get('accuracy', '0')
+            self.resultArea.append(f" ➤ Sistema operativo detectado: {osName} (Precisión: {osAccuracy}%)")
         else:
             self.resultArea.append(" ➤ Sistema operativo: No detectado.")
 
         # Espacio para mostrar resultados del script "vulners"
-        vuln_info = ""
+        vulnInfo = ""
         
         # Mostrar información avanzada (-A)
         #advanced_info = ""
@@ -111,10 +111,10 @@ class MainWindow(QMainWindow):
         for proto in scanner[host].all_protocols():
             ports = scanner[host][proto].keys()
             for port in ports:
-                port_data = scanner[host][proto][port]
-                state = port_data['state']
-                service = port_data.get('name', 'desconocido')
-                version = port_data.get('version', '')
+                portData = scanner[host][proto][port]
+                state = portData['state']
+                service = portData.get('name', 'desconocido')
+                version = portData.get('version', '')
 
                 # Mostrar resultados
                 self.resultArea.append(f"  - [{proto.upper()}] Puerto {port}: {state}, Servicio: {service}, Versión: {version or 'desconocida'}")
@@ -123,32 +123,24 @@ class MainWindow(QMainWindow):
                 cursor.execute("""
                     INSERT INTO puertos (escaneo_id, protocolo, puerto, estado, servicio, version)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (escaneo_id, proto.upper(), port, state, service, version))
-                puerto_id = cursor.lastrowid
+                """, (escaneoId, proto.upper(), port, state, service, version))
+                puertoId = cursor.lastrowid
+
 
                 # Guardar vulnerabilidades si existen
-                if 'script' in port_data and 'vulners' in port_data['script']:
-                    vuln_output = port_data['script']['vulners']
-                    vuln_info += f"\n[VULN] Puerto {port}:\n{vuln_output}\n"
-                    # Extraer CVEs del output (simplemente busca líneas que empiecen con CVE-)
-                    for line in vuln_output.splitlines():
-                        if line.startswith("CVE-"):
-                            parts = line.split()
-                            cve = parts[0]
-                            descripcion = " ".join(parts[1:]) if len(parts) > 1 else ""
-                            cursor.execute("""
-                                INSERT INTO vulnerabilidades (puerto_id, cve, explotable, descripcion)
-                                VALUES (?, ?, ?, ?)
-                            """, (puerto_id, cve, None, descripcion))
+                if 'script' in portData and 'vulners' in portData['script']:
+                    vulnOutput = portData['script']['vulners']
+                    vulnInfo += f"\n[VULN] Puerto {port}:\n{vulnOutput}\n"
+                    self.guardarVulnerabilidad(cursor, puertoId, vulnOutput)
 
                 portState[state] += 1
 
-        if vuln_info:
-            self.resultArea.append("\n[Resultados del script 'vulners']" + vuln_info)
+        if vulnInfo:
+            self.resultArea.append("\n[Resultados del script 'vulners']" + vulnInfo)
 
                 # Mostrar scripts NSE si existen
-                #if 'script' in port_data:
-                #    for script_name, script_output in port_data['script'].items():
+                #if 'script' in portData:
+                #    for script_name, script_output in portData['script'].items():
                 #        advanced_info += f"    [NSE] {script_name}: {script_output}\n"
 
         # Traceroute si existe
@@ -160,13 +152,70 @@ class MainWindow(QMainWindow):
         #if advanced_info:
         #    self.resultArea.append("\n[Información avanzada -A]\n" + advanced_info)
 
+    # Procesa y guarda las vulnerabilidades extraídas del script 'vulners' en la base de datos
+    def guardarVulnerabilidad(self, cursor, puertoId, vulnOutput):
+        ignorarPrimeraLinea = True  # Indicador para ignorar la primera línea después del encabezado del puerto
+
+        for line in vulnOutput.splitlines():
+            # Ignorar la primera línea después del encabezado del puerto
+            if ignorarPrimeraLinea:
+                ignorarPrimeraLinea = False
+                continue
+
+            # Dividir la línea en partes
+            parts = line.split()
+            if len(parts) < 2:
+                # Si la línea no tiene suficientes partes para ser una vulnerabilidad, ignorarla
+                continue
+
+            idVulnerabilidad = parts[0]  # El identificador puede ser CVE o cualquier otro
+            cvss = None
+            descripcion = ""
+            explotable = "*EXPLOIT*" in line
+
+            # Extraer el puntaje CVSS si está presente
+            if parts[1].replace('.', '', 1).isdigit():
+                cvss = float(parts[1])
+                descripcion = " ".join(parts[2:]) if len(parts) > 2 else ""
+            else:
+                descripcion = " ".join(parts[1:]) if len(parts) > 1 else ""
+
+            # Guardar la vulnerabilidad en la base de datos
+            cursor.execute("""
+                INSERT INTO vulnerabilidades (puerto_id, id_vulnerabilidad, explotable, cvss, descripcion)
+                VALUES (?, ?, ?, ?, ?)
+            """, (puertoId, idVulnerabilidad, explotable, cvss, descripcion))
+
     # Muestra un resumen del escaneo
     def summary(self, portState):
         resumen = "\nResumen del escaneo:\n"
+        total_vulnerabilidades = 0
+        total_explotables = 0
+
         for state, quantity in portState.items():
             resumen += f"  - {state}: {quantity} puertos\n"
         total = sum(portState.values())
-        resumen += f"Total de puertos escaneados: {total}"
+        resumen += f"Total de puertos escaneados: {total}\n"
+
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.cursor()
+            # Obtener el ID del último escaneo (el escaneo actual)
+            cursor.execute("SELECT MAX(id) FROM escaneos")
+            escaneo_actual_id = cursor.fetchone()[0]
+
+            # Obtener la cantidad de vulnerabilidades y explotables del escaneo actual
+            cursor.execute("""
+                SELECT COUNT(*), SUM(CASE WHEN explotable THEN 1 ELSE 0 END)
+                FROM vulnerabilidades
+                WHERE escaneo_id = ?
+            """, (escaneo_actual_id,))
+            total_vulnerabilidades, total_explotables = cursor.fetchone()
+            total_vulnerabilidades = total_vulnerabilidades or 0
+            total_explotables = total_explotables or 0
+
+        resumen += f"Total de vulnerabilidades encontradas: {total_vulnerabilidades}\n"
+        resumen += f"Total de vulnerabilidades explotables: {total_explotables}\n"
+
         self.resultArea.append(resumen)
 
 # Ejecuta la aplicación
