@@ -2,11 +2,10 @@ import sys
 import sqlite3
 import nmap
 from datetime import datetime
-from collections import Counter
 from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QPushButton, QLineEdit, QTextEdit
 
 # Constantes
-DB_NAME = "data/hosts_puertos.db"
+DB_NAME = "data/scans.db"
 DEFAULT_TARGET = "scanme.nmap.org"
 
 class MainWindow(QMainWindow):
@@ -42,7 +41,8 @@ class MainWindow(QMainWindow):
     def beginScan(self):
         target = self.targetInput.text().strip() or DEFAULT_TARGET
         # Argumentos para el escaneo de servicios y su versión, detección de sistema operativo, escaneo en alta velocidad y el script para vulnerabilidades
-        options = "-sV -O -T5 --script vulners"
+        options = "-sV -O -T5 --script vulners --system-dns"
+        startTime = datetime.now()
         self.resultArea.append(f"Iniciando escaneo para: {target}")
         self.resultArea.append(f"Argumentos de Nmap: {options}")
 
@@ -53,33 +53,30 @@ class MainWindow(QMainWindow):
             if not scanner.all_hosts():
                 self.resultArea.append("❌ No se encontraron hosts en el escaneo.\n")
                 return
+            
+            endTime = datetime.now()
+            tiempoRespuesta = (endTime - startTime).total_seconds()
 
-            timestamp = datetime.now().isoformat(sep=' ', timespec='seconds')
-            portState = Counter()
+            # Inicializar diccionario para contar estados de puertos
+            portStates = {"abierto": 0, "filtrado": 0}
 
             with sqlite3.connect(DB_NAME) as conn:
                 cursor = conn.cursor()
+
+                # Insertar en escaneos
+                cursor.execute("""
+                    INSERT INTO escaneos (fecha_hora, comando, tiempo_respuesta)
+                    VALUES (?, ?, ?)
+                """, (startTime.isoformat(sep=' ', timespec='seconds'), options, tiempoRespuesta))
+                idEscaneo = cursor.lastrowid
+
                 for host in scanner.all_hosts():
-                    # Obtener sistema operativo
-                    if 'osmatch' in scanner[host] and scanner[host]['osmatch']:
-                        osInfo = scanner[host]['osmatch'][0]
-                        osName = osInfo.get('name', 'Desconocido')
-                    else:
-                        osName = None
-
-                    # Insertar en escaneos y obtener escaneo_id
-                    cursor.execute("""
-                        INSERT INTO escaneos (fecha_hora, host, comando, sistema_operativo)
-                        VALUES (?, ?, ?, ?)
-                    """, (timestamp, host, options, osName))
-                    escaneoId = cursor.lastrowid
-
-                    self.procesarHost(scanner, host, cursor, escaneoId, portState)
+                    self.procesarHost(scanner, host, cursor, idEscaneo, portStates)
 
                 conn.commit()
 
-            self.summary(portState)
             self.resultArea.append("✅ Datos guardados en la base de datos.")
+            self.summary(portStates)
 
         except nmap.PortScannerError as e:
             self.resultArea.append(f"❌ Error al inicializar el escáner: {e}")
@@ -89,10 +86,11 @@ class MainWindow(QMainWindow):
             self.resultArea.append(f"❌ Error inesperado: {e}")
 
     # Procesa un host escaneado y guarda los datos en la base de datos
-    def procesarHost(self, scanner, host, cursor, escaneoId, portState):
+    def procesarHost(self, scanner, host, cursor, idEscaneo, portStates):
         self.resultArea.append(f"\nResultados para: {host}")
 
-        # Mostrar información del sistema operativo si está disponible
+        # Conseguir SO del host
+        osName = None
         if 'osmatch' in scanner[host] and scanner[host]['osmatch']:
             osInfo = scanner[host]['osmatch'][0]
             osName = osInfo.get('name', 'Desconocido')
@@ -101,13 +99,22 @@ class MainWindow(QMainWindow):
         else:
             self.resultArea.append(" ➤ Sistema operativo: No detectado.")
 
+        # Conseguir dirección MAC del host
+        macAddress = None
+        if 'addresses' in scanner[host] and 'mac' in scanner[host]['addresses']:
+            macAddress = scanner[host]['addresses']['mac']
+            self.resultArea.append(f" ➤ Dirección MAC: {macAddress}")
+        
+        # Insertar información del host
+        cursor.execute("""
+            INSERT INTO escaneos_host (id_escaneo, id_host, direccion_mac, sistema_operativo)
+            VALUES (?, ?, ?, ?)
+        """, (idEscaneo, host, macAddress, osName))
+
         # Espacio para mostrar resultados del script "vulners"
         vulnInfo = ""
-        
-        # Mostrar información avanzada (-A)
-        #advanced_info = ""
 
-        # Scripts NSE por puerto
+        # Script para escanear puertos y vulnerabilidades
         for proto in scanner[host].all_protocols():
             ports = scanner[host][proto].keys()
             for port in ports:
@@ -116,44 +123,31 @@ class MainWindow(QMainWindow):
                 service = portData.get('name', 'desconocido')
                 version = portData.get('version', '')
 
+                # Actualizar conteo de puertos
+                stateEsp = "abierto" if state == "open" else "filtrado"
+                if stateEsp in portStates:
+                    portStates[stateEsp] += 1
+
                 # Mostrar resultados
                 self.resultArea.append(f"  - [{proto.upper()}] Puerto {port}: {state}, Servicio: {service}, Versión: {version or 'desconocida'}")
 
-                # Guardar puerto y obtener puerto_id
+                # Guardar información del puerto
                 cursor.execute("""
-                    INSERT INTO puertos (escaneo_id, protocolo, puerto, estado, servicio, version)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (escaneoId, proto.upper(), port, state, service, version))
-                puertoId = cursor.lastrowid
-
+                    INSERT INTO escaneos_puertos (id_escaneo, id_host, puerto, protocolo, estado, servicio, version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (idEscaneo, host, port, proto.upper(), state, service, version))
 
                 # Guardar vulnerabilidades si existen
                 if 'script' in portData and 'vulners' in portData['script']:
                     vulnOutput = portData['script']['vulners']
                     vulnInfo += f"\n[VULN] Puerto {port}:\n{vulnOutput}\n"
-                    self.guardarVulnerabilidad(cursor, puertoId, vulnOutput)
-
-                portState[state] += 1
+                    self.guardarVulnerabilidad(cursor, idEscaneo, host, port, proto, vulnOutput)
 
         if vulnInfo:
             self.resultArea.append("\n[Resultados del script 'vulners']" + vulnInfo)
 
-                # Mostrar scripts NSE si existen
-                #if 'script' in portData:
-                #    for script_name, script_output in portData['script'].items():
-                #        advanced_info += f"    [NSE] {script_name}: {script_output}\n"
-
-        # Traceroute si existe
-        #if 'traceroute' in scanner[host]:
-        #    advanced_info += "  ➤ Traceroute:\n"
-        #    for hop in scanner[host]['traceroute']['hop']:
-        #        advanced_info += f"    Hop {hop['ttl']}: {hop['ipaddr']} ({hop.get('rtt', 'N/A')} ms)\n"
-
-        #if advanced_info:
-        #    self.resultArea.append("\n[Información avanzada -A]\n" + advanced_info)
-
     # Procesa y guarda las vulnerabilidades extraídas del script 'vulners' en la base de datos
-    def guardarVulnerabilidad(self, cursor, puertoId, vulnOutput):
+    def guardarVulnerabilidad(self, cursor, idEscaneo, host, port, proto, vulnOutput):
         ignorarPrimeraLinea = True  # Indicador para ignorar la primera línea después del encabezado del puerto
 
         for line in vulnOutput.splitlines():
@@ -168,7 +162,7 @@ class MainWindow(QMainWindow):
                 # Si la línea no tiene suficientes partes para ser una vulnerabilidad, ignorarla
                 continue
 
-            idVulnerabilidad = parts[0]  # El identificador puede ser CVE o cualquier otro
+            codigoVulnerabilidad = parts[0]  # El identificador puede ser CVE o cualquier otro
             cvss = None
             descripcion = ""
             explotable = "*EXPLOIT*" in line
@@ -182,41 +176,37 @@ class MainWindow(QMainWindow):
 
             # Guardar la vulnerabilidad en la base de datos
             cursor.execute("""
-                INSERT INTO vulnerabilidades (puerto_id, id_vulnerabilidad, explotable, cvss, descripcion)
-                VALUES (?, ?, ?, ?, ?)
-            """, (puertoId, idVulnerabilidad, explotable, cvss, descripcion))
+                INSERT INTO vulnerabilidades 
+                (id_escaneo, id_host, puerto, protocolo, codigo_vulnerabilidad, explotable, cvss, descripcion)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (idEscaneo, host, port, proto.upper(), codigoVulnerabilidad, explotable, cvss, descripcion))
 
     # Muestra un resumen del escaneo
-    def summary(self, portState):
-        resumen = "\nResumen del escaneo:\n"
-        total_vulnerabilidades = 0
-        total_explotables = 0
-
-        for state, quantity in portState.items():
-            resumen += f"  - {state}: {quantity} puertos\n"
-        total = sum(portState.values())
-        resumen += f"Total de puertos escaneados: {total}\n"
-
+    def summary(self, portStates):
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
-            # Obtener el ID del último escaneo (el escaneo actual)
+            # Obtener el ID del escaneo actual
             cursor.execute("SELECT MAX(id) FROM escaneos")
-            escaneo_actual_id = cursor.fetchone()[0]
+            idEscaneoActual = cursor.fetchone()[0]
 
             # Obtener la cantidad de vulnerabilidades y explotables del escaneo actual
             cursor.execute("""
                 SELECT COUNT(*), SUM(CASE WHEN explotable THEN 1 ELSE 0 END)
                 FROM vulnerabilidades
-                WHERE escaneo_id = ?
-            """, (escaneo_actual_id,))
-            total_vulnerabilidades, total_explotables = cursor.fetchone()
-            total_vulnerabilidades = total_vulnerabilidades or 0
-            total_explotables = total_explotables or 0
+                WHERE id_escaneo = ?
+            """, (idEscaneoActual,))
+            totalVulnerabilidades, totalExplotables = cursor.fetchone()
+            totalVulnerabilidades = totalVulnerabilidades or 0
+            totalExplotables = totalExplotables or 0
 
-        resumen += f"Total de vulnerabilidades encontradas: {total_vulnerabilidades}\n"
-        resumen += f"Total de vulnerabilidades explotables: {total_explotables}\n"
-
-        self.resultArea.append(resumen)
+            resumen = "\nResumen del escaneo:\n"
+            resumen += f"Duración del escaneo: {datetime.now() - datetime.fromisoformat(cursor.execute('SELECT fecha_hora FROM escaneos WHERE id = ?', (idEscaneoActual,)).fetchone()[0])}\n"
+            for state, count in portStates.items():
+                if count > 0:
+                    resumen += f"Puertos {state}: {count}\n"
+            resumen += f"Total de vulnerabilidades encontradas: {totalVulnerabilidades}\n"
+            resumen += f"Total de vulnerabilidades explotables: {totalExplotables}\n"
+            self.resultArea.append(resumen)
 
 # Ejecuta la aplicación
 if __name__ == "__main__":
