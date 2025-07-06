@@ -1,19 +1,39 @@
 import nmap
 import sqlite3
+import os
 from datetime import datetime
 from core.constants import DB_NAME
 
 class NmapScanner:
     @staticmethod
+    def _hasRootPrivileges():
+        """Verifica si el proceso tiene privilegios de root"""
+        try:
+            return os.geteuid() == 0
+        except AttributeError:
+            return False  # No estamos en Unix/Linux
+            
+    @staticmethod
     def scanTarget(target, scanType, resultCallback=None):
+        # Verificar privilegios de root
+        hasRoot = NmapScanner._hasRootPrivileges()
+        
         # Base de opciones para el escaneo
         baseOptions = "-T5 --script vulners"
-
-        # Opciones específicas según el tipo de escaneo
-        if scanType == "UDP":
-            options = f"-sUV -O {baseOptions}"  # UDP scan with version detection
+        
+        # Configurar opciones según privilegios y tipo de escaneo
+        if hasRoot:
+            if scanType == "UDP":
+                options = f"-sUV -O {baseOptions}"  # UDP scan with version detection and OS detection
+            else:
+                options = f"-sV -O {baseOptions}"   # TCP scan with version detection and OS detection
         else:
-            options = f"-sV -O {baseOptions}"   # TCP scan with version detection
+            if resultCallback:
+                resultCallback("⚠️ No se tienen privilegios de root. El escaneo de sistema operativo será omitido.")
+            if scanType == "UDP":
+                options = f"-sUV {baseOptions}"  # UDP scan with version detection only
+            else:
+                options = f"-sV {baseOptions}"   # TCP scan with version detection only
             
         startTime = datetime.now()
         
@@ -37,7 +57,8 @@ class NmapScanner:
                 'scanner': scanner,
                 'start_time': startTime,
                 'response_time': tiempoRespuesta,
-                'command': options
+                'command': options,
+                'has_root': hasRoot
             }
 
         except nmap.PortScannerError as e:
@@ -108,6 +129,12 @@ class ScanResultProcessor:
         self._processPorts(scanner[host], host, cursor, idEscaneo)
 
     def _processOsInfo(self, hostData):
+        # Verificar si tenemos privilegios de root del escaneo
+        if not self.scanResults.get('has_root', False):
+            if self.resultCallback:
+                self.resultCallback(" ➤ Sistema operativo: No detectado (se requieren privilegios de root)")
+            return None
+            
         if 'osmatch' in hostData and hostData['osmatch']:
             osInfo = hostData['osmatch'][0]
             osName = osInfo.get('name', 'Desconocido')
@@ -117,7 +144,7 @@ class ScanResultProcessor:
             return osName
         else:
             if self.resultCallback:
-                self.resultCallback(" ➤ Sistema operativo: No detectado.")
+                self.resultCallback(" ➤ Sistema operativo: No detectado")
             return None
 
     def _processMacAddress(self, hostData):
@@ -202,6 +229,9 @@ class ScanResultProcessor:
             """, (idEscaneo, host, port, proto.upper(), codigoVulnerabilidad, explotable, cvss, descripcion))
 
     def _showSummary(self):
+        if self.resultCallback is None:
+            return
+            
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT MAX(id) FROM escaneos")

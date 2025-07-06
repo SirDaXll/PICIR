@@ -14,6 +14,8 @@ class RecordManager:
                         e.id,
                         e.fecha_hora,
                         eh.id_host,
+                        eh.direccion_mac,
+                        eh.sistema_operativo,
                         COUNT(DISTINCT ep.puerto) as total_puertos,
                         COUNT(DISTINCT v.id_vulnerabilidad) as total_vulnerabilidades
                     FROM escaneos e
@@ -48,8 +50,10 @@ class RecordManager:
                         "id": record[0],
                         "fecha": record[1],
                         "ip_host": record[2],
-                        "puertos_abiertos": record[3] or 0,
-                        "vulnerabilidades": record[4] or 0
+                        "mac_address": record[3] or "No detectada",
+                        "sistema_operativo": record[4] or "No detectado",
+                        "puertos_abiertos": record[5] or 0,
+                        "vulnerabilidades": record[6] or 0
                     }
                     for record in records
                 ]
@@ -71,6 +75,8 @@ class RecordManager:
                         e.fecha_hora,
                         e.comando,
                         e.tiempo_respuesta,
+                        eh.id_host,
+                        eh.direccion_mac,
                         eh.sistema_operativo
                     FROM escaneos e
                     JOIN escaneos_host eh ON e.id = eh.id_escaneo
@@ -114,7 +120,9 @@ class RecordManager:
                         "fecha": generalInfo[0],
                         "comando": generalInfo[1],
                         "tiempo_respuesta": generalInfo[2],
-                        "sistema_operativo": generalInfo[3]
+                        "ip_host": generalInfo[3],
+                        "mac_address": generalInfo[4] or "No detectada",
+                        "sistema_operativo": generalInfo[5] or "No detectado"
                     },
                     "puertos": [
                         {

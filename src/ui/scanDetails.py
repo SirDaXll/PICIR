@@ -3,9 +3,24 @@ from PySide6.QtWidgets import (
     QLabel, QWidget, QGridLayout, QHeaderView, QPushButton, QScrollArea,
     QMessageBox
 )
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QIcon
 from typing import Dict, Any
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QColor, QIcon, QDesktopServices
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QTabWidget, QTableWidget, QTableWidgetItem,
+    QLabel, QWidget, QGridLayout, QHeaderView, QPushButton, QScrollArea,
+    QMessageBox
+)
+
+# Constants for UI
+DISPLAY_ROLE = Qt.ItemDataRole.DisplayRole
+USER_ROLE = Qt.ItemDataRole.UserRole
+INTERACTIVE_MODE = QHeaderView.ResizeMode.Interactive
+NO_EDIT_TRIGGERS = QTableWidget.EditTrigger.NoEditTriggers
+ALIGN_CENTER = Qt.AlignmentFlag.AlignCenter
+MESSAGE_YES = QMessageBox.StandardButton.Yes
+MESSAGE_NO = QMessageBox.StandardButton.No
+BLUE_COLOR = QColor('blue')
 
 class ScanDetailsDialog(QDialog):
     def __init__(self, scanDetails: Dict[str, Any], parent=None):
@@ -36,11 +51,11 @@ class ScanDetailsDialog(QDialog):
                     self,
                     "Abrir URL",
                     f"¿Desea abrir la siguiente URL en su navegador?\n\n{url}\n\nEn ella verá información sobre la vulnerabilidad.",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
+                    MESSAGE_YES | MESSAGE_NO,
+                    MESSAGE_NO
                 )
                 
-                if response == QMessageBox.Yes:
+                if response == MESSAGE_YES:
                     QDesktopServices.openUrl(QUrl(url))
 
     def setup_ui(self):
@@ -58,10 +73,12 @@ class ScanDetailsDialog(QDialog):
         
         generalInfo = self.scanDetails["general"]
         labels = [
-            ("📅 Fecha y hora del escaneo:", generalInfo["fecha"]),
-            ("🔍 Comando utilizado para escanear:", generalInfo["comando"]),
-            ("⏱️ Tiempo de respuesta:", f"{self.formatTime(generalInfo['tiempo_respuesta'])}"),
-            ("💻 Sistema operativo detectado:", generalInfo["sistema_operativo"] or "No detectado"),
+            ("🌐 IP del host:", generalInfo.get("ip_host", "No disponible")),
+            ("📱 Dirección MAC:", generalInfo.get("mac_address", "No detectada")),
+            ("💻 Sistema operativo detectado:", generalInfo.get("sistema_operativo", "No detectado")),
+            ("📅 Fecha y hora del escaneo:", generalInfo.get("fecha", "No disponible")),
+            ("🔍 Comando utilizado para escanear:", generalInfo.get("comando", "No disponible")),
+            ("⏱️ Tiempo de respuesta:", self.formatTime(generalInfo.get("tiempo_respuesta", 0)))
         ]
         
         for i, (label, value) in enumerate(labels):
@@ -77,7 +94,7 @@ class ScanDetailsDialog(QDialog):
         if not self.scanDetails["puertos"]:
             # Si no hay puertos, mostrar mensaje
             noPortsLabel = QLabel("No se encontraron puertos abiertos en este escaneo.")
-            noPortsLabel.setAlignment(Qt.AlignCenter)
+            noPortsLabel.setAlignment(ALIGN_CENTER)
             portsLayout.addWidget(noPortsLabel)
         else:
             # Crear y configurar la tabla de puertos
@@ -110,25 +127,25 @@ class ScanDetailsDialog(QDialog):
             header = portsTable.horizontalHeader()
             
             # Puerto
-            header.setSectionResizeMode(0, QHeaderView.Interactive)
+            header.setSectionResizeMode(0, INTERACTIVE_MODE)
             portsTable.setColumnWidth(0, 100)
             
             # Protocolo
-            header.setSectionResizeMode(1, QHeaderView.Interactive)
+            header.setSectionResizeMode(1, INTERACTIVE_MODE)
             portsTable.setColumnWidth(1, 100)
             
             # Servicio
-            header.setSectionResizeMode(2, QHeaderView.Interactive)
+            header.setSectionResizeMode(2, INTERACTIVE_MODE)
             portsTable.setColumnWidth(2, 150)
             
             # Versión
-            header.setSectionResizeMode(3, QHeaderView.Interactive)
+            header.setSectionResizeMode(3, INTERACTIVE_MODE)
             portsTable.setColumnWidth(3, 200)
             
             # Configuraciones adicionales
             header.setStretchLastSection(True)
             header.setSortIndicatorShown(True)
-            portsTable.setEditTriggers(QTableWidget.NoEditTriggers)
+            portsTable.setEditTriggers(NO_EDIT_TRIGGERS)
             portsTable.verticalHeader().setDefaultSectionSize(30)
             portsTable.verticalHeader().setMinimumSectionSize(30)
 
@@ -140,8 +157,8 @@ class ScanDetailsDialog(QDialog):
                 
                 # Puerto (ordenable numéricamente)
                 portItem = QTableWidgetItem()
-                portItem.setData(Qt.DisplayRole, str(port["puerto"]))
-                portItem.setData(Qt.UserRole, int(port["puerto"]))
+                portItem.setData(DISPLAY_ROLE, str(port["puerto"]))
+                portItem.setData(USER_ROLE, int(port["puerto"]))
                 portsTable.setItem(row, 0, portItem)
                 
                 # Los demás campos ordenables como texto
@@ -161,7 +178,7 @@ class ScanDetailsDialog(QDialog):
         if not self.scanDetails["vulnerabilidades"]:
             # Si no hay vulnerabilidades, mostrar mensaje
             noVulnsLabel = QLabel("No se encontraron vulnerabilidades en este escaneo.")
-            noVulnsLabel.setAlignment(Qt.AlignCenter)
+            noVulnsLabel.setAlignment(ALIGN_CENTER)
             vulnsLayout.addWidget(noVulnsLabel)
         else:
             # Crear y configurar la tabla de vulnerabilidades
@@ -194,25 +211,25 @@ class ScanDetailsDialog(QDialog):
             header = vulnsTable.horizontalHeader()
             
             # Puerto
-            header.setSectionResizeMode(0, QHeaderView.Interactive)
+            header.setSectionResizeMode(0, INTERACTIVE_MODE)
             vulnsTable.setColumnWidth(0, 100)
             
             # Protocolo
-            header.setSectionResizeMode(1, QHeaderView.Interactive)
+            header.setSectionResizeMode(1, INTERACTIVE_MODE)
             vulnsTable.setColumnWidth(1, 100)
             
             # Explotable
-            header.setSectionResizeMode(2, QHeaderView.Interactive)
+            header.setSectionResizeMode(2, INTERACTIVE_MODE)
             vulnsTable.setColumnWidth(2, 110)
             
             # Descripción (con URLs clicables)
-            header.setSectionResizeMode(3, QHeaderView.Interactive)
+            header.setSectionResizeMode(3, INTERACTIVE_MODE)
             vulnsTable.setColumnWidth(3, 390)
             
             # Configuraciones adicionales
             header.setStretchLastSection(True)
             header.setSortIndicatorShown(True)
-            vulnsTable.setEditTriggers(QTableWidget.NoEditTriggers)
+            vulnsTable.setEditTriggers(NO_EDIT_TRIGGERS)
             vulnsTable.verticalHeader().setDefaultSectionSize(30)
             vulnsTable.verticalHeader().setMinimumSectionSize(30)
             
@@ -227,8 +244,8 @@ class ScanDetailsDialog(QDialog):
                 
                 # Puerto (ordenable numéricamente)
                 portItem = QTableWidgetItem()
-                portItem.setData(Qt.DisplayRole, str(vuln["puerto"]))
-                portItem.setData(Qt.UserRole, int(vuln["puerto"]))
+                portItem.setData(DISPLAY_ROLE, str(vuln["puerto"]))
+                portItem.setData(USER_ROLE, int(vuln["puerto"]))
                 vulnsTable.setItem(row, 0, portItem)
                 
                 # Protocolo
@@ -236,14 +253,14 @@ class ScanDetailsDialog(QDialog):
                 
                 # Explotable (ordenable)
                 explotableItem = QTableWidgetItem()
-                explotableItem.setData(Qt.DisplayRole, "Sí" if vuln["explotable"] else "No")
-                explotableItem.setData(Qt.UserRole, 1 if vuln["explotable"] else 0)
+                explotableItem.setData(DISPLAY_ROLE, "Sí" if vuln["explotable"] else "No")
+                explotableItem.setData(USER_ROLE, 1 if vuln["explotable"] else 0)
                 vulnsTable.setItem(row, 2, explotableItem)
                 
                 # Crear ítem de descripción con URL clicable
                 descItem = QTableWidgetItem(vuln["descripcion"])
                 if vuln["descripcion"].startswith(("http://", "https://")):
-                    descItem.setForeground(Qt.blue)
+                    descItem.setForeground(BLUE_COLOR)
                     descItem.setToolTip("Haz clic para abrir en el navegador")
                 vulnsTable.setItem(row, 3, descItem)
             

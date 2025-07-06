@@ -1,15 +1,20 @@
 from PySide6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
                              QWidget, QPushButton, QLineEdit, QTextEdit, QComboBox,
                              QLabel, QFrame, QTabWidget, QTableWidget, QTableWidgetItem, 
-                             QHeaderView, QMessageBox)
+                             QHeaderView, QMessageBox, QFileDialog, QDialog)
 from PySide6.QtGui import QPalette, QRegularExpressionValidator, QIcon
 from PySide6.QtCore import QRegularExpression, Qt
 from core.constants import DEFAULT_TARGET
 from core.scanner import NmapScanner, ScanResultProcessor
 from core.records import RecordManager
+from core.remote_db import RemoteDBManager
 from ui.scanDetails import ScanDetailsDialog
 from ui.datePickerDialog import DatePickerDialog
+from ui.remoteConfigDialog import RemoteConfigDialog
+from ui.remoteStatusDialog import RemoteStatusDialog
+from ui.remoteFileSelector import RemoteFileSelector
 from styles.themes import DARK_THEME, LIGHT_THEME
+import sqlite3
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -19,6 +24,9 @@ class MainWindow(QMainWindow):
         
         # Lista para mantener referencias a las ventanas de detalles
         self.detailWindows = []
+        
+        # Gestor de conexión remota
+        self.remote_manager = RemoteDBManager()
         
         # Detectar tema del sistema
         app = QApplication.instance()
@@ -46,6 +54,9 @@ class MainWindow(QMainWindow):
         # Configurar pestaña de registros
         self._setupRecordsTab()
 
+        # Configurar pestaña de honeypot
+        self._setupHoneypotTab()
+
         self.setCentralWidget(mainWidget)
 
     def _setupTopBar(self, mainLayout):
@@ -60,6 +71,13 @@ class MainWindow(QMainWindow):
         self.themeCombo.currentTextChanged.connect(self.changeTheme)
         topBar.addWidget(themeLabel)
         topBar.addWidget(self.themeCombo)
+        
+        # Botón de sincronización remota
+        self.remoteButton = QPushButton(" Conexión remota")
+        self.remoteButton.setIcon(QIcon.fromTheme("network-server"))
+        self.remoteButton.clicked.connect(self.showRemoteConfig)
+        topBar.addWidget(self.remoteButton)
+        
         topBar.addStretch()
         mainLayout.addLayout(topBar)
 
@@ -238,6 +256,34 @@ class MainWindow(QMainWindow):
 
         # Realizar búsqueda inicial
         self.searchRecords()
+
+    def _setupHoneypotTab(self):
+        """Configura la pestaña de registros del honeypot"""
+        honeypotTab = QWidget()
+        layout = QVBoxLayout(honeypotTab)
+        
+        # Frame superior para controles
+        controlFrame = QFrame()
+        controlLayout = QHBoxLayout(controlFrame)
+        
+        # Etiqueta para mostrar el archivo seleccionado
+        self.honeypotDbLabel = QLabel("No hay base de datos seleccionada")
+        controlLayout.addWidget(self.honeypotDbLabel)
+        
+        # Botón para seleccionar archivo
+        self.selectHoneypotButton = QPushButton("Seleccionar base de datos")
+        self.selectHoneypotButton.clicked.connect(self._selectHoneypotDb)
+        controlLayout.addWidget(self.selectHoneypotButton)
+        
+        layout.addWidget(controlFrame)
+        
+        # Tabla de registros
+        self.honeypotTable = QTableWidget()
+        self.honeypotTable.setEditTriggers(QTableWidget.NoEditTriggers)  # Solo lectura
+        layout.addWidget(self.honeypotTable)
+        
+        # Añadir la pestaña
+        self.tabWidget.addTab(honeypotTab, "Registros Honeypot")
 
     def showDatePicker(self):
         try:
@@ -438,3 +484,259 @@ class MainWindow(QMainWindow):
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al mostrar detalles: {str(e)}")
+
+    def openRemoteConfig(self):
+        try:
+            # Crear diálogo de configuración remota
+            dialog = RemoteConfigDialog(self)
+            dialog.setWindowTitle("Configuración Remota")
+            
+            # Mostrar diálogo de forma modal
+            dialog.exec_()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error al abrir configuración remota: {str(e)}")
+
+    def showRemoteConfig(self):
+        """Muestra el diálogo de configuración/estado de conexión remota"""
+        # Verificar si ya hay una conexión activa intentando usar el SFTP
+        try:
+            if self.remote_manager.sftp:
+                try:
+                    # Intentar una operación simple para verificar la conexión
+                    self.remote_manager.sftp.stat('.')
+                    # Si llegamos aquí, la conexión está activa
+                    dialog = RemoteStatusDialog(self.remote_manager, self)
+                    dialog.exec_()
+                    return
+                except Exception:
+                    # La conexión está rota, limpiarla
+                    self.remote_manager.disconnect()
+            
+            # No hay conexión o se perdió, mostrar diálogo de configuración
+            dialog = RemoteConfigDialog(self)
+            # Establecer el RemoteDBManager y conectar señales
+            dialog.setRemoteManager(self.remote_manager)
+            dialog.connectionEstablished.connect(lambda: self.remote_manager.syncProgress.emit("✅ Conexión establecida"))
+            dialog.exec_()
+            
+        except Exception as e:
+            # Si hay cualquier error inesperado
+            QMessageBox.critical(self, "Error", f"Error al verificar la conexión: {str(e)}")
+            self.remote_manager.disconnect()
+
+    def _selectHoneypotDb(self):
+        """Abre el diálogo para seleccionar una base de datos remota del honeypot"""
+        try:
+            if not self.remote_manager.isConnected():
+                QMessageBox.warning(
+                    self,
+                    "Conexión remota requerida",
+                    "Debe establecer una conexión remota primero para acceder a las bases de datos"
+                )
+                self.showRemoteConfig()
+                return
+            
+            dialog = RemoteFileSelector(self.remote_manager, self)
+            dialog.fileSelected.connect(self._loadHoneypotDb)
+            
+            # Mostrar el diálogo
+            dialog.exec_()
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Error al abrir el selector de archivos: {str(e)}"
+            )
+
+    def _loadHoneypotDb(self, remote_path):
+        """Carga una base de datos del honeypot desde la ruta remota especificada"""
+        try:
+            # Crear directorio temporal si no existe
+            import tempfile
+            import os
+            temp_dir = os.path.join(tempfile.gettempdir(), "picir_honeypot")
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            # Verificar que sea un archivo SQLite válido
+            filename = os.path.basename(remote_path)
+            if not self._is_sqlite_file(filename):
+                raise Exception("El archivo seleccionado no es una base de datos SQLite válida")
+            
+            # Generar nombre para archivo temporal local
+            local_path = os.path.join(temp_dir, filename)
+            
+            # Descargar el archivo usando el SFTP
+            try:
+                if not self.remote_manager.ssh:
+                    raise Exception("No hay conexión SSH activa")
+                sftp = self.remote_manager.ssh.open_sftp()
+                sftp.get(remote_path, local_path)
+                sftp.close()
+            except Exception as e:
+                raise Exception(f"Error al descargar el archivo: {str(e)}")
+            
+            # Conectar a la base de datos
+            conn = sqlite3.connect(local_path)
+            cursor = conn.cursor()
+            
+            # Primero verificar si las tablas existen
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name IN ('escaneos', 'escaneos_host', 'escaneos_puertos', 'vulnerabilidades');
+            """)
+            existing_tables = [row[0] for row in cursor.fetchall()]
+            
+            if 'escaneos' in existing_tables and 'escaneos_host' in existing_tables:
+                # Consulta JOIN para obtener toda la información relacionada
+                query = """
+                    SELECT 
+                        e.fecha_hora,
+                        h.id_host,
+                        h.direccion_mac,
+                        h.sistema_operativo,
+                        e.comando,
+                        e.tiempo_respuesta,
+                        p.puerto,
+                        p.protocolo,
+                        p.estado,
+                        p.servicio,
+                        p.version,
+                        v.codigo_vulnerabilidad,
+                        v.explotable,
+                        v.cvss,
+                        v.descripcion
+                    FROM escaneos e
+                    JOIN escaneos_host h ON e.id = h.id_escaneo
+                    LEFT JOIN escaneos_puertos p ON h.id_escaneo = p.id_escaneo AND h.id_host = p.id_host
+                    LEFT JOIN vulnerabilidades v ON p.id_escaneo = v.id_escaneo 
+                        AND p.id_host = v.id_host 
+                        AND p.puerto = v.puerto 
+                        AND p.protocolo = v.protocolo
+                    ORDER BY e.fecha_hora DESC, h.id_host, p.puerto;
+                """
+            else:
+                # Si no existen las tablas, hacer una consulta simple
+                table_name = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1").fetchone()[0]
+                query = f"SELECT * FROM {table_name};"
+            
+            cursor.execute(query)
+            records = cursor.fetchall()
+            
+            # Definir las columnas que queremos mostrar
+            columns = [
+                "Fecha y Hora", "Host", "MAC", "Sistema Operativo",
+                "Puerto", "Protocolo", "Estado", "Servicio", "Versión",
+                "Vulnerabilidad", "CVSS", "Explotable"
+            ]
+            
+            # Configurar la tabla
+            self.honeypotTable.setColumnCount(len(columns))
+            self.honeypotTable.setHorizontalHeaderLabels(columns)
+            
+            # Ajustar tamaño y comportamiento de las columnas
+            header = self.honeypotTable.horizontalHeader()
+            header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+            
+            # Establecer anchos iniciales para las columnas
+            column_widths = {
+                0: 150,  # Fecha y Hora
+                1: 120,  # Host
+                2: 120,  # MAC
+                3: 150,  # Sistema Operativo
+                4: 70,   # Puerto
+                5: 80,   # Protocolo
+                6: 80,   # Estado
+                7: 100,  # Servicio
+                8: 100,  # Versión
+                9: 150,  # Vulnerabilidad
+                10: 70,  # CVSS
+                11: 80,  # Explotable
+            }
+            
+            for col, width in column_widths.items():
+                self.honeypotTable.setColumnWidth(col, width)
+            
+            # Permitir ordenamiento
+            self.honeypotTable.setSortingEnabled(True)
+            header.setSortIndicatorShown(True)
+            
+            # Eliminar filas vacías
+            for row in range(self.honeypotTable.rowCount() - 1, -1, -1):
+                is_empty = True
+                for col in range(self.honeypotTable.columnCount()):
+                    item = self.honeypotTable.item(row, col)
+                    if item and item.text().strip():
+                        is_empty = False
+                        break
+                if is_empty:
+                    self.honeypotTable.removeRow(row)
+            
+            # Procesar y mostrar los datos
+            current_row = -1
+            current_host = None
+            self.honeypotTable.setRowCount(len(records))
+            
+            if 'escaneos' in existing_tables and 'escaneos_host' in existing_tables:
+                for record in records:
+                    # Si es un nuevo host o la primera fila
+                    if current_host != record[1]:  # record[1] es id_host
+                        current_row += 1
+                        current_host = record[1]
+                        
+                        # Fecha y Hora
+                        self.honeypotTable.setItem(current_row, 0, QTableWidgetItem(str(record[0] or "")))
+                        # Host (IP)
+                        self.honeypotTable.setItem(current_row, 1, QTableWidgetItem(str(record[1] or "")))
+                        # MAC
+                        mac_addr = str(record[2] or "No detectada").strip()
+                        self.honeypotTable.setItem(current_row, 2, QTableWidgetItem(mac_addr))
+                        # Sistema Operativo
+                        os_info = str(record[3] or "No detectado").strip()
+                        self.honeypotTable.setItem(current_row, 3, QTableWidgetItem(os_info))
+                        # Puerto
+                        self.honeypotTable.setItem(current_row, 4, QTableWidgetItem(str(record[6] or "")))
+                        # Protocolo
+                        self.honeypotTable.setItem(current_row, 5, QTableWidgetItem(str(record[7] or "")))
+                        # Estado
+                        self.honeypotTable.setItem(current_row, 6, QTableWidgetItem(str(record[8] or "")))
+                        # Servicio
+                        self.honeypotTable.setItem(current_row, 7, QTableWidgetItem(str(record[9] or "")))
+                        # Versión
+                        self.honeypotTable.setItem(current_row, 8, QTableWidgetItem(str(record[10] or "")))
+                        # Vulnerabilidad
+                        self.honeypotTable.setItem(current_row, 9, QTableWidgetItem(str(record[11] or "")))
+                        # CVSS
+                        self.honeypotTable.setItem(current_row, 10, QTableWidgetItem(str(record[13] or "")))
+                        # Explotable
+                        explotable = "Sí" if record[12] else "No" if record[12] is not None else ""
+                        self.honeypotTable.setItem(current_row, 11, QTableWidgetItem(explotable))
+            else:
+                # Si no es una base de datos de escaneos, mostrar los datos tal cual
+                for row, record in enumerate(records):
+                    for col, value in enumerate(record):
+                        self.honeypotTable.setItem(row, col, QTableWidgetItem(str(value or "")))
+            
+            # Ajustar tamaño de columnas
+            self.honeypotTable.resizeColumnsToContents()
+            
+            # Actualizar etiqueta
+            self.honeypotDbLabel.setText(f"Base de datos: {os.path.basename(remote_path)}")
+            
+            # Limpiar recursos
+            cursor.close()
+            conn.close()
+            
+            # Eliminar archivo temporal
+            os.remove(local_path)
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Error al cargar la base de datos del honeypot: {str(e)}"
+            )
+
+    def _is_sqlite_file(self, filename):
+        """Verifica si un nombre de archivo tiene una extensión válida de SQLite"""
+        return filename.lower().endswith(('.db', '.sqlite', '.db3', '.sqlite3'))
