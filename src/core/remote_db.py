@@ -12,10 +12,10 @@ class RemoteDBManager(QObject):
     """Clase para manejar la conexión y sincronización con la base de datos remota."""
     
     # Señales para notificar eventos
-    syncStarted = Signal()
-    syncCompleted = Signal()
-    syncError = Signal(str)
-    syncProgress = Signal(str)
+    sync_started = Signal()
+    sync_completed = Signal()
+    sync_error = Signal(str)
+    sync_progress = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -23,7 +23,7 @@ class RemoteDBManager(QObject):
         self.ssh = None
         self._temp_db = None
     
-    def connect(self, hostname, username, password=None, key_filename=None, port=22):
+    def connect_to_server(self, hostname, username, password=None, key_filename=None, port=22):
         """
         Establece la conexión SSH/SFTP con el servidor remoto.
         
@@ -52,13 +52,13 @@ class RemoteDBManager(QObject):
             
             # Abrir sesión SFTP
             self.sftp = self.ssh.open_sftp()
-            self.syncProgress.emit("Conexión establecida exitosamente")
+            self.sync_progress.emit("Conexión establecida exitosamente")
             
         except Exception as e:
-            self.syncError.emit(f"Error al conectar: {str(e)}")
+            self.sync_error.emit(f"Error al conectar: {str(e)}")
             raise
     
-    def disconnect(self):
+    def close_connections(self):
         """Cierra las conexiones SSH y SFTP."""
         if self.sftp:
             self.sftp.close()
@@ -75,12 +75,12 @@ class RemoteDBManager(QObject):
             remote_path (str): Ruta completa al archivo de base de datos en el servidor remoto
         """
         if not self.sftp:
-            self.syncError.emit("No hay conexión SFTP establecida")
+            self.sync_error.emit("No hay conexión SFTP establecida")
             return False
             
         try:
-            self.syncStarted.emit()
-            self.syncProgress.emit("Iniciando sincronización desde remoto...")
+            self.sync_started.emit()
+            self.sync_progress.emit("Iniciando sincronización desde remoto...")
             
             # Crear directorio local si no existe
             os.makedirs(os.path.dirname(DB_NAME), exist_ok=True)
@@ -89,16 +89,16 @@ class RemoteDBManager(QObject):
             if os.path.exists(DB_NAME):
                 backup_name = f"{DB_NAME}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
                 os.rename(DB_NAME, backup_name)
-                self.syncProgress.emit(f"Backup creado: {backup_name}")
+                self.sync_progress.emit(f"Backup creado: {backup_name}")
             
             # Descargar base de datos remota
             self.sftp.get(remote_path, DB_NAME)
-            self.syncProgress.emit("Base de datos sincronizada exitosamente")
-            self.syncCompleted.emit()
+            self.sync_progress.emit("Base de datos sincronizada exitosamente")
+            self.sync_completed.emit()
             return True
             
         except Exception as e:
-            self.syncError.emit(f"Error durante la sincronización: {str(e)}")
+            self.sync_error.emit(f"Error durante la sincronización: {str(e)}")
             return False
     
     def sync_local_to_remote(self, remote_path):
@@ -109,16 +109,16 @@ class RemoteDBManager(QObject):
             remote_path (str): Ruta completa al archivo de base de datos en el servidor remoto
         """
         if not self.sftp:
-            self.syncError.emit("No hay conexión SFTP establecida")
+            self.sync_error.emit("No hay conexión SFTP establecida")
             return False
             
         try:
-            self.syncStarted.emit()
-            self.syncProgress.emit("Iniciando sincronización hacia remoto...")
+            self.sync_started.emit()
+            self.sync_progress.emit("Iniciando sincronización hacia remoto...")
             
             # Verificar que existe la base de datos local
             if not os.path.exists(DB_NAME):
-                self.syncError.emit("No existe base de datos local para sincronizar")
+                self.sync_error.emit("No existe base de datos local para sincronizar")
                 return False
             
             # Crear backup remoto si existe el archivo
@@ -126,32 +126,35 @@ class RemoteDBManager(QObject):
                 self.sftp.stat(remote_path)  # Verificar si existe el archivo
                 backup_name = f"{remote_path}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
                 self.sftp.rename(remote_path, backup_name)
-                self.syncProgress.emit(f"Backup remoto creado: {backup_name}")
+                self.sync_progress.emit(f"Backup remoto creado: {backup_name}")
             except FileNotFoundError:
                 # Si no existe el archivo remoto, continuamos
                 pass
             except Exception as e:
-                self.syncError.emit(f"Error al crear backup remoto: {str(e)}")
+                self.sync_error.emit(f"Error al crear backup remoto: {str(e)}")
                 # Continuamos de todas formas
             
             # Subir base de datos local
             self.sftp.put(DB_NAME, remote_path)
-            self.syncProgress.emit("Base de datos sincronizada exitosamente")
-            self.syncCompleted.emit()
+            self.sync_progress.emit("Base de datos sincronizada exitosamente")
+            self.sync_completed.emit()
             return True
             
         except Exception as e:
-            self.syncError.emit(f"Error durante la sincronización: {str(e)}")
+            self.sync_error.emit(f"Error durante la sincronización: {str(e)}")
             return False
     
-    def isConnected(self):
+    def is_connected(self):
         """Verifica si hay una conexión activa al servidor remoto.
         
         Returns:
             bool: True si hay una conexión activa, False en caso contrario
         """
-        return self.ssh is not None and self.ssh.get_transport() is not None and self.ssh.get_transport().is_active()
+        if self.ssh is not None:
+            transport = self.ssh.get_transport()
+            return transport is not None and transport.is_active()
+        return False
     
     def __del__(self):
         """Asegurar que se cierren las conexiones al destruir el objeto."""
-        self.disconnect()
+        self.close_connections()
