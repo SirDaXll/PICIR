@@ -4,85 +4,101 @@ import os
 from datetime import datetime
 from core.constants import DB_NAME
 
+
 class NmapScanner:
     @staticmethod
-    def _hasRootPrivileges():
+    def _has_root_privileges():
         """Verifica si el proceso tiene privilegios de root"""
         try:
             return os.geteuid() == 0
         except AttributeError:
             return False  # No estamos en Unix/Linux
-            
+
     @staticmethod
-    def scanTarget(target, scanType, resultCallback=None):
+    def scan_target(target, scan_type, result_callback=None):
+        """Realiza un escaneo de red con Nmap.
+
+        Args:
+            target: IP o rango de IPs a escanear
+            scan_type: Tipo de escaneo ("TCP" o "UDP")
+            result_callback: Función opcional para recibir actualizaciones
+
+        Returns:
+            Diccionario con los resultados del escaneo o None si no se encontraron hosts
+        """
         # Verificar privilegios de root
-        hasRoot = NmapScanner._hasRootPrivileges()
+        has_root = NmapScanner._has_root_privileges()
         
         # Base de opciones para el escaneo
-        baseOptions = "-T5 --script vulners"
+        base_options = "-T5 --script vulners"
         
         # Configurar opciones según privilegios y tipo de escaneo
-        if hasRoot:
-            if scanType == "UDP":
-                options = f"-sUV -O {baseOptions}"  # UDP scan with version detection and OS detection
+        if has_root:
+            if scan_type == "UDP":
+                options = f"-sUV -O {base_options}"  # UDP con detección de versión y SO
             else:
-                options = f"-sV -O {baseOptions}"   # TCP scan with version detection and OS detection
+                options = f"-sV -O {base_options}"   # TCP con detección de versión y SO
         else:
-            if resultCallback:
-                resultCallback("⚠️ No se tienen privilegios de root. El escaneo de sistema operativo será omitido.")
-            if scanType == "UDP":
-                options = f"-sUV {baseOptions}"  # UDP scan with version detection only
+            if result_callback:
+                result_callback(
+                    "⚠️ No se tienen privilegios de root. "
+                    "El escaneo de sistema operativo será omitido."
+                )
+            if scan_type == "UDP":
+                options = f"-sUV {base_options}"  # UDP con detección de versión
             else:
-                options = f"-sV {baseOptions}"   # TCP scan with version detection only
+                options = f"-sV {base_options}"   # TCP con detección de versión
             
-        startTime = datetime.now()
+        start_time = datetime.now()
         
-        if resultCallback:
-            resultCallback(f"Iniciando escaneo {scanType} para: {target}")
-            resultCallback(f"Argumentos de Nmap: {options}")
+        if result_callback:
+            result_callback(f"Iniciando escaneo {scan_type} para: {target}")
+            result_callback(f"Argumentos de Nmap: {options}")
 
         try:
             scanner = nmap.PortScanner()
             scanner.scan(target, arguments=options)
 
             if not scanner.all_hosts():
-                if resultCallback:
-                    resultCallback("❌ No se encontraron hosts en el escaneo.\n")
+                if result_callback:
+                    result_callback("❌ No se encontraron hosts en el escaneo.\n")
                 return None
 
-            endTime = datetime.now()
-            tiempoRespuesta = (endTime - startTime).total_seconds()
+            end_time = datetime.now()
+            tiempo_respuesta = (end_time - start_time).total_seconds()
 
             return {
                 'scanner': scanner,
-                'start_time': startTime,
-                'response_time': tiempoRespuesta,
+                'start_time': start_time,
+                'response_time': tiempo_respuesta,
                 'command': options,
-                'has_root': hasRoot
+                'has_root': has_root
             }
 
         except nmap.PortScannerError as e:
-            if resultCallback:
-                resultCallback(f"❌ Error al inicializar el escáner: {e}")
+            if result_callback:
+                result_callback(f"❌ Error al inicializar el escáner: {e}")
             raise
         except Exception as e:
-            if resultCallback:
-                resultCallback(f"❌ Error inesperado: {e}")
+            if result_callback:
+                result_callback(f"❌ Error inesperado: {e}")
             raise
 
+
 class ScanResultProcessor:
-    def __init__(self, scanResults, resultCallback=None):
-        self.scanResults = scanResults
-        self.resultCallback = resultCallback
-        self.portStates = {
+    def __init__(self, scan_results, result_callback=None):
+        self.scan_results = scan_results
+        self.result_callback = result_callback
+        self.port_states = {
             "abierto": 0,
             "filtrado": 0,
             "cerrado": 0,
             "abierto|filtrado": 0
         }
 
-    def processResults(self):
-        scanner = self.scanResults['scanner']
+    def process_results(self):
+        """Procesa y guarda los resultados del escaneo en la base de datos."""
+        scanner = self.scan_results['scanner']
         
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
@@ -92,174 +108,149 @@ class ScanResultProcessor:
                 INSERT INTO escaneos (fecha_hora, comando, tiempo_respuesta)
                 VALUES (?, ?, ?)
             """, (
-                self.scanResults['start_time'].isoformat(sep=' ', timespec='seconds'),
-                self.scanResults['command'],
-                self.scanResults['response_time']
+                self.scan_results['start_time'].isoformat(sep=' ', timespec='seconds'),
+                self.scan_results['command'],
+                self.scan_results['response_time']
             ))
-            idEscaneo = cursor.lastrowid
+            scan_id = cursor.lastrowid
 
+            # Procesar cada host escaneado
             for host in scanner.all_hosts():
-                self._processHost(scanner, host, cursor, idEscaneo)
+                if self.result_callback:
+                    self.result_callback(f"\nProcesando host: {host}")
 
-            conn.commit()
+                # Obtener información del sistema operativo si está disponible
+                os_info = None
+                if 'osmatch' in scanner[host] and scanner[host]['osmatch']:
+                    os_match = scanner[host]['osmatch'][0]
+                    os_info = f"{os_match['name']} ({os_match['accuracy']}%)"
+                    if self.result_callback:
+                        self.result_callback(f"Sistema operativo detectado: {os_info}")
 
-        if self.resultCallback:
-            self.resultCallback("✅ Datos guardados en la base de datos.")
-            self._showSummary()
+                # Insertar información del host
+                cursor.execute("""
+                    INSERT INTO escaneos_host (id_escaneo, id_host, direccion_mac, sistema_operativo)
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    scan_id,
+                    host,
+                    scanner[host].get('mac', None) if 'mac' in scanner[host] else None,
+                    os_info
+                ))
 
-        return self.portStates
+                # Procesar puertos para cada protocolo
+                for proto in scanner[host].all_protocols():
+                    ports = scanner[host][proto].keys()
+                    for port in ports:
+                        port_info = scanner[host][proto][port]
+                        state = port_info['state']
+                        service = port_info.get('name', '')
+                        version = port_info.get('version', '')
+                        product = port_info.get('product', '')
+                        extrainfo = port_info.get('extrainfo', '')
 
-    def _processHost(self, scanner, host, cursor, idEscaneo):
-        if self.resultCallback:
-            self.resultCallback(f"\nResultados para: {host}")
+                        # Incrementar contador del estado del puerto
+                        state_key = state.lower().replace(' ', '')
+                        if state_key in self.port_states:
+                            self.port_states[state_key] += 1
 
-        # Procesar sistema operativo
-        osName = self._processOsInfo(scanner[host])
-        
-        # Procesar dirección MAC
-        macAddress = self._processMacAddress(scanner[host])
+                        # Formatear versión completa del servicio
+                        full_version = service
+                        if product:
+                            full_version += f" {product}"
+                        if version:
+                            full_version += f" {version}"
+                        if extrainfo:
+                            full_version += f" ({extrainfo})"
 
-        # Insertar información del host
-        cursor.execute("""
-            INSERT INTO escaneos_host (id_escaneo, id_host, direccion_mac, sistema_operativo)
-            VALUES (?, ?, ?, ?)
-        """, (idEscaneo, host, macAddress, osName))
+                        if self.result_callback:
+                            state_name = {
+                                "open": "abierto",
+                                "filtered": "filtrado",
+                                "closed": "cerrado",
+                                "open|filtered": "abierto|filtrado"
+                            }.get(state, state)
+                            self.result_callback(
+                                f"Puerto {port}/{proto} - Estado: {state_name} - "
+                                f"Servicio: {full_version}"
+                            )
 
-        # Procesar puertos y vulnerabilidades
-        self._processPorts(scanner[host], host, cursor, idEscaneo)
+                        # Insertar información del puerto
+                        cursor.execute("""
+                            INSERT INTO escaneos_puertos (
+                                id_escaneo, id_host, puerto, protocolo,
+                                estado, servicio, version
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            scan_id, host, port, proto, state,
+                            service, full_version
+                        ))
 
-    def _processOsInfo(self, hostData):
-        # Verificar si tenemos privilegios de root del escaneo
-        if not self.scanResults.get('has_root', False):
-            if self.resultCallback:
-                self.resultCallback(" ➤ Sistema operativo: No detectado (se requieren privilegios de root)")
-            return None
-            
-        if 'osmatch' in hostData and hostData['osmatch']:
-            osInfo = hostData['osmatch'][0]
-            osName = osInfo.get('name', 'Desconocido')
-            osAccuracy = osInfo.get('accuracy', '0')
-            if self.resultCallback:
-                self.resultCallback(f" ➤ Sistema operativo detectado: {osName} (Precisión: {osAccuracy}%)")
-            return osName
-        else:
-            if self.resultCallback:
-                self.resultCallback(" ➤ Sistema operativo: No detectado")
-            return None
+                        # Procesar vulnerabilidades del puerto si las hay
+                        if 'script' in port_info and 'vulners' in port_info['script']:
+                            ignore_first_line = True
+                            vulners_output = port_info['script']['vulners']
+                            
+                            for line in vulners_output.split('\n'):
+                                if ignore_first_line:
+                                    ignore_first_line = False
+                                    continue
+                                    
+                                if not line.strip():
+                                    continue
+                                    
+                                try:
+                                    parts = line.strip().split('\t')
+                                    if len(parts) >= 2:
+                                        cve_id = parts[0].strip()
+                                        cvss = float(parts[1].strip())
+                                        url = parts[2].strip() if len(parts) > 2 else ""
+                                        
+                                        cursor.execute("""
+                                            INSERT INTO vulnerabilidades (
+                                                id_escaneo, id_host, puerto, protocolo,
+                                                codigo_vulnerabilidad, explotable,
+                                                cvss, descripcion
+                                            )
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                        """, (
+                                            scan_id, host, port, proto,
+                                            cve_id, cvss >= 7.0, cvss, url
+                                        ))
+                                except ValueError:
+                                    if self.result_callback:
+                                        self.result_callback(
+                                            f"⚠️ Error al procesar vulnerabilidad: {line}"
+                                        )
 
-    def _processMacAddress(self, hostData):
-        if 'addresses' in hostData and 'mac' in hostData['addresses']:
-            macAddress = hostData['addresses']['mac']
-            if self.resultCallback:
-                self.resultCallback(f" ➤ Dirección MAC: {macAddress}")
-            return macAddress
-        return None
-
-    def _processPorts(self, hostData, host, cursor, idEscaneo):
-        vulnInfo = ""
-        
-        for proto in hostData.all_protocols():
-            ports = hostData[proto].keys()
-            for port in ports:
-                portData = hostData[proto][port]
-                self._processPort(portData, proto, port, host, cursor, idEscaneo, vulnInfo)
-
-        if vulnInfo and self.resultCallback:
-            self.resultCallback("\n[Resultados del script 'vulners']" + vulnInfo)
-
-    def _processPort(self, portData, proto, port, host, cursor, idEscaneo, vulnInfo):
-        state = portData['state']
-        service = portData.get('name', 'desconocido')
-        version = portData.get('version', '')
-
-        # Actualizar conteo de puertos
-        if state == "open":
-            self.portStates["abierto"] += 1
-        elif state == "filtered":
-            self.portStates["filtrado"] += 1
-        elif state == "closed":
-            self.portStates["cerrado"] += 1
-        elif state == "open|filtered":
-            self.portStates["abierto|filtrado"] += 1
-
-        if self.resultCallback:
-            self.resultCallback(f"  - [{proto.upper()}] Puerto {port}: {state}, Servicio: {service}, Versión: {version or 'desconocida'}")
-
-        # Guardar información del puerto
-        cursor.execute("""
-            INSERT INTO escaneos_puertos (id_escaneo, id_host, puerto, protocolo, estado, servicio, version)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (idEscaneo, host, port, proto.upper(), state, service, version))
-
-        # Procesar vulnerabilidades
-        if 'script' in portData and 'vulners' in portData['script']:
-            vulnOutput = portData['script']['vulners']
-            vulnInfo += f"\n[VULN] Puerto {port}:\n{vulnOutput}\n"
-            self._processVulnerabilities(cursor, idEscaneo, host, port, proto, vulnOutput)
-
-    def _processVulnerabilities(self, cursor, idEscaneo, host, port, proto, vulnOutput):
-        ignorarPrimeraLinea = True
-
-        for line in vulnOutput.splitlines():
-            if ignorarPrimeraLinea:
-                ignorarPrimeraLinea = False
-                continue
-
-            parts = line.split()
-            if len(parts) < 2:
-                continue
-
-            codigoVulnerabilidad = parts[0]
-            cvss = None
-            descripcion = ""
-
-            if parts[1].replace('.', '', 1).isdigit():
-                cvss = float(parts[1])
-                descripcion = " ".join(parts[2:]) if len(parts) > 2 else ""
-            else:
-                descripcion = " ".join(parts[1:]) if len(parts) > 1 else ""
-            
-            explotable = "*EXPLOIT*" in descripcion
-            descripcion = descripcion.replace("*EXPLOIT*", "").strip()
+            # Obtener estadísticas
+            cursor.execute("""
+                SELECT id FROM escaneos WHERE id = ?
+            """, (scan_id,))
+            current_scan_id = cursor.fetchone()[0]
 
             cursor.execute("""
-                INSERT INTO vulnerabilidades 
-                (id_escaneo, id_host, puerto, protocolo, codigo_vulnerabilidad, explotable, cvss, descripcion)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (idEscaneo, host, port, proto.upper(), codigoVulnerabilidad, explotable, cvss, descripcion))
-
-    def _showSummary(self):
-        if self.resultCallback is None:
-            return
-            
-        with sqlite3.connect(DB_NAME) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT MAX(id) FROM escaneos")
-            idEscaneoActual = cursor.fetchone()[0]
-
-            cursor.execute("""
-                SELECT COUNT(*), SUM(CASE WHEN explotable THEN 1 ELSE 0 END)
+                SELECT COUNT(*), COUNT(CASE WHEN explotable THEN 1 END)
                 FROM vulnerabilidades
                 WHERE id_escaneo = ?
-            """, (idEscaneoActual,))
-            totalVulnerabilidades, totalExplotables = cursor.fetchone()
-            totalVulnerabilidades = totalVulnerabilidades or 0
-            totalExplotables = totalExplotables or 0
+            """, (current_scan_id,))
+            total_vulns, total_exploitable = cursor.fetchone()
+            total_vulns = total_vulns or 0
+            total_exploitable = total_exploitable or 0
 
-            resumen = "\n📊 Resumen del escaneo:\n"
-            resumen += f"\n⏱️ Duración del escaneo: {datetime.now() - self.scanResults['start_time']}"
-            resumen += "\n🔍 Estado de los puertos:\n"
-            estadosNombres = {
-                "abierto": "Abiertos",
-                "filtrado": "Filtrados",
-                "cerrado": "Cerrados",
-                "abierto|filtrado": "Abiertos y filtrados"
-            }
-            for state, count in self.portStates.items():
-                if count > 0:
-                    nombreEstado = estadosNombres.get(state, state)
-                    resumen += f"  • Puertos {nombreEstado}: {count}\n"
-            resumen += f"Total de vulnerabilidades encontradas: {totalVulnerabilidades}\n"
-            resumen += f"Total de vulnerabilidades explotables: {totalExplotables}\n"
-            
-            self.resultCallback(resumen)
+            if self.result_callback:
+                self.result_callback("\nResumen del escaneo:")
+                self.result_callback(f"Total de hosts escaneados: {len(scanner.all_hosts())}")
+                state_names = {
+                    "abierto": "abiertos",
+                    "filtrado": "filtrados",
+                    "cerrado": "cerrados",
+                    "abierto|filtrado": "abiertos/filtrados"
+                }
+                for state, count in self.port_states.items():
+                    if count > 0:
+                        state_name = state_names.get(state, state)
+                        self.result_callback(f"Puertos {state_name}: {count}")
+                self.result_callback(f"Vulnerabilidades detectadas: {total_vulns}")
+                self.result_callback(f"Vulnerabilidades explotables: {total_exploitable}")

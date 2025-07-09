@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
                              QWidget, QPushButton, QLineEdit, QTextEdit, QComboBox,
                              QLabel, QFrame, QTabWidget, QTableWidget, QTableWidgetItem, 
-                             QHeaderView, QMessageBox, QFileDialog, QDialog)
+                             QHeaderView, QMessageBox, QAbstractItemView)
 from PySide6.QtGui import QPalette, QRegularExpressionValidator, QIcon
 from PySide6.QtCore import QRegularExpression, Qt
 from core.constants import DEFAULT_TARGET
@@ -14,6 +14,9 @@ from ui.remoteConfigDialog import RemoteConfigDialog
 from ui.remoteStatusDialog import RemoteStatusDialog
 from ui.remoteFileSelector import RemoteFileSelector
 from styles.themes import DARK_THEME, LIGHT_THEME
+from datetime import datetime
+import tempfile
+import os
 import sqlite3
 
 class MainWindow(QMainWindow):
@@ -30,188 +33,191 @@ class MainWindow(QMainWindow):
         
         # Detectar tema del sistema
         app = QApplication.instance()
-        self.isDarkTheme = app.palette().color(QPalette.Window).lightness() < 128
+        if isinstance(app, QApplication):
+            self.isDarkTheme = app.palette().color(QPalette.ColorRole.Window).lightness() < 128
+        else:
+            self.isDarkTheme = False  # Default to light theme if app is None
         self.setStyleSheet(DARK_THEME if self.isDarkTheme else LIGHT_THEME)
 
-        self._setupUi()
+        self._setup_ui()
 
-    def _setupUi(self):
+    def _setup_ui(self):
         # Widget y layout principal
-        mainWidget = QWidget()
-        mainLayout = QVBoxLayout()
-        mainWidget.setLayout(mainLayout)
+        main_widget = QWidget()
+        main_layout = QVBoxLayout()
+        main_widget.setLayout(main_layout)
 
         # Configurar barra superior
-        self._setupTopBar(mainLayout)
+        self._setup_top_bar(main_layout)
 
         # Configurar pestañas
         self.tabWidget = QTabWidget()
-        mainLayout.addWidget(self.tabWidget)
+        main_layout.addWidget(self.tabWidget)
 
         # Configurar pestaña de escaneo
-        self._setupScanTab()
+        self._setup_scan_tab()
 
         # Configurar pestaña de registros
-        self._setupRecordsTab()
+        self._setup_records_tab()
 
         # Configurar pestaña de honeypot
-        self._setupHoneypotTab()
+        self._setup_honeypot_tab()
 
-        self.setCentralWidget(mainWidget)
+        self.setCentralWidget(main_widget)
 
-    def _setupTopBar(self, mainLayout):
-        topBar = QHBoxLayout()
+    def _setup_top_bar(self, main_layout):
+        top_bar = QHBoxLayout()
         
         # Selector de tema
-        themeLabel = QLabel("Tema:")
+        theme_label = QLabel("Tema:")
         self.themeCombo = QComboBox()
         self.themeCombo.setObjectName("themeSelector")
         self.themeCombo.addItems(["Sistema", "Claro", "Oscuro"])
         self.themeCombo.setCurrentText("Sistema")
-        self.themeCombo.currentTextChanged.connect(self.changeTheme)
-        topBar.addWidget(themeLabel)
-        topBar.addWidget(self.themeCombo)
+        self.themeCombo.currentTextChanged.connect(self.change_theme)
+        top_bar.addWidget(theme_label)
+        top_bar.addWidget(self.themeCombo)
         
         # Botón de sincronización remota
         self.remoteButton = QPushButton(" Conexión remota")
         self.remoteButton.setIcon(QIcon.fromTheme("network-server"))
-        self.remoteButton.clicked.connect(self.showRemoteConfig)
-        topBar.addWidget(self.remoteButton)
+        self.remoteButton.clicked.connect(self.show_remote_config)
+        top_bar.addWidget(self.remoteButton)
         
-        topBar.addStretch()
-        mainLayout.addLayout(topBar)
+        top_bar.addStretch()
+        main_layout.addLayout(top_bar)
 
-    def _setupScanTab(self):
-        scanTab = QWidget()
-        scanLayout = QVBoxLayout()
-        scanTab.setLayout(scanLayout)
+    def _setup_scan_tab(self):
+        scan_tab = QWidget()
+        scan_layout = QVBoxLayout()
+        scan_tab.setLayout(scan_layout)
 
         # Sección de entrada para el escaneo
-        inputFrame = QFrame()
-        inputLayout = QVBoxLayout()
-        inputFrame.setLayout(inputLayout)
+        input_frame = QFrame()
+        input_layout = QVBoxLayout()
+        input_frame.setLayout(input_layout)
 
         # Target input
-        targetLabel = QLabel("Objetivo del escaneo:")
+        target_label = QLabel("Objetivo del escaneo:")
         self.targetInput = QLineEdit()
         self.targetInput.setPlaceholderText(f"Ingrese la IP, rango de IPs o el nombre del host (Si deja vacío se usará: {DEFAULT_TARGET})")
-        inputLayout.addWidget(targetLabel)
-        inputLayout.addWidget(self.targetInput)
+        input_layout.addWidget(target_label)
+        input_layout.addWidget(self.targetInput)
 
         # Tipo de escaneo
-        scanTypeLabel = QLabel("Tipo de escaneo:")
+        scan_type_label = QLabel("Tipo de escaneo:")
         self.scanTypeCombo = QComboBox()
         self.scanTypeCombo.addItems(["TCP", "UDP"])
-        inputLayout.addWidget(scanTypeLabel)
-        inputLayout.addWidget(self.scanTypeCombo)
+        input_layout.addWidget(scan_type_label)
+        input_layout.addWidget(self.scanTypeCombo)
 
         # Preview del comando
-        previewFrameLabel = QLabel("Vista previa del comando:")
+        preview_frame_label = QLabel("Vista previa del comando:")
         self.previewLabel = QLabel()
         self.previewLabel.setObjectName("previewLabel")
         self.previewLabel.setWordWrap(True)
-        inputLayout.addWidget(previewFrameLabel)
-        inputLayout.addWidget(self.previewLabel)
+        input_layout.addWidget(preview_frame_label)
+        input_layout.addWidget(self.previewLabel)
 
         # Conectar señales para actualizar el preview
-        self.targetInput.textChanged.connect(self.updateNmapCommand)
-        self.scanTypeCombo.currentTextChanged.connect(self.updateNmapCommand)
+        self.targetInput.textChanged.connect(self.update_nmap_command)
+        self.scanTypeCombo.currentTextChanged.connect(self.update_nmap_command)
         
         # Botón de escaneo
         self.scanButton = QPushButton("Iniciar escaneo")
-        self.scanButton.clicked.connect(self.beginScan)
-        inputLayout.addWidget(self.scanButton)
+        self.scanButton.clicked.connect(self.begin_scan)
+        input_layout.addWidget(self.scanButton)
 
-        scanLayout.addWidget(inputFrame)
+        scan_layout.addWidget(input_frame)
 
         # Área de resultados del escaneo
-        resultsLabel = QLabel("Resultados del escaneo:")
+        results_label = QLabel("Resultados del escaneo:")
         self.resultArea = QTextEdit()
         self.resultArea.setReadOnly(True)
-        scanLayout.addWidget(resultsLabel)
-        scanLayout.addWidget(self.resultArea)
+        scan_layout.addWidget(results_label)
+        scan_layout.addWidget(self.resultArea)
 
         # Actualizar el preview inicial
-        self.updateNmapCommand()
+        self.update_nmap_command()
 
         # Añadir la pestaña de escaneo
-        self.tabWidget.addTab(scanTab, "Escaneo")
+        self.tabWidget.addTab(scan_tab, "Escaneo")
 
-    def _setupRecordsTab(self):
-        recordsTab = QWidget()
-        recordsLayout = QVBoxLayout()
-        recordsTab.setLayout(recordsLayout)
+    def _setup_records_tab(self):
+        records_tab = QWidget()
+        records_layout = QVBoxLayout()
+        records_tab.setLayout(records_layout)
 
         # Controles para filtrar registros
-        filterFrame = QFrame()
-        filterLayout = QHBoxLayout()
-        filterFrame.setLayout(filterLayout)
+        filter_frame = QFrame()
+        filter_layout = QHBoxLayout()
+        filter_frame.setLayout(filter_layout)
         
         # Botón de refrescar
-        refreshLayout = QVBoxLayout()
-        refreshLabel = QLabel("Actualizar:")
+        refresh_layout = QVBoxLayout()
+        refresh_label = QLabel("Actualizar:")
         self.refreshBtn = QPushButton(" Recargar")
-        self.refreshBtn.clicked.connect(self.refreshRecords)
+        self.refreshBtn.clicked.connect(self.refresh_records)
         self.refreshBtn.setIcon(QIcon.fromTheme("view-refresh"))
         
-        refreshLayout.addWidget(refreshLabel)
-        refreshLayout.addWidget(self.refreshBtn)
-        filterLayout.addLayout(refreshLayout)
+        refresh_layout.addWidget(refresh_label)
+        refresh_layout.addWidget(self.refreshBtn)
+        filter_layout.addLayout(refresh_layout)
 
         # Botón y etiqueta para filtrar por fecha
-        dateFilterLayout = QVBoxLayout()
-        dateLabel = QLabel("Filtrar por fecha:")
+        date_filter_layout = QVBoxLayout()
+        date_label = QLabel("Filtrar por fecha:")
         self.dateFilterBtn = QPushButton("Seleccionar fecha")
-        self.dateFilterBtn.clicked.connect(self.showDatePicker)
+        self.dateFilterBtn.clicked.connect(self.show_date_picker)
         self.selectedDate = None
         
-        dateFilterLayout.addWidget(dateLabel)
-        dateFilterLayout.addWidget(self.dateFilterBtn)
-        filterLayout.addLayout(dateFilterLayout)
+        date_filter_layout.addWidget(date_label)
+        date_filter_layout.addWidget(self.dateFilterBtn)
+        filter_layout.addLayout(date_filter_layout)
 
         # Filtro de IP
-        ipFilterLayout = QVBoxLayout()
-        ipLabel = QLabel("Filtrar por IP del host:")
+        ip_filter_layout = QVBoxLayout()
+        ip_label = QLabel("Filtrar por IP del host:")
         self.ipFilter = QLineEdit()
         self.ipFilter.setPlaceholderText("Ej: 192.168.1.1")
         
         # Validador para direcciones IP (parciales o completas)
-        ipRegex = QRegularExpression(r"^(\d{1,3}\.){0,3}\d{0,3}$")
-        self.ipFilter.setValidator(QRegularExpressionValidator(ipRegex))
-        self.ipFilter.textChanged.connect(self.searchRecords)
+        ip_regex = QRegularExpression(r"^(\d{1,3}\.){0,3}\d{0,3}$")
+        self.ipFilter.setValidator(QRegularExpressionValidator(ip_regex))
+        self.ipFilter.textChanged.connect(self.search_records)
         
-        ipFilterLayout.addWidget(ipLabel)
-        ipFilterLayout.addWidget(self.ipFilter)
-        filterLayout.addLayout(ipFilterLayout)
+        ip_filter_layout.addWidget(ip_label)
+        ip_filter_layout.addWidget(self.ipFilter)
+        filter_layout.addLayout(ip_filter_layout)
 
-        recordsLayout.addWidget(filterFrame)
+        records_layout.addWidget(filter_frame)
 
         # Tabla de resultados
         self.recordsTable = QTableWidget()
         self.recordsTable.setColumnCount(5)
         
         # Crear items de encabezado con iconos
-        dateHeader = QTableWidgetItem("Fecha y hora")
-        dateHeader.setIcon(QIcon.fromTheme("calendar"))
+        date_header = QTableWidgetItem("Fecha y hora")
+        date_header.setIcon(QIcon.fromTheme("calendar"))
         
-        ipHeader = QTableWidgetItem("IP del host")
-        ipHeader.setIcon(QIcon.fromTheme("network-server"))
+        ip_header = QTableWidgetItem("IP del host")
+        ip_header.setIcon(QIcon.fromTheme("network-server"))
         
-        portsHeader = QTableWidgetItem("Puertos abiertos")
-        portsHeader.setIcon(QIcon.fromTheme("network-transmit"))
+        ports_header = QTableWidgetItem("Puertos abiertos")
+        ports_header.setIcon(QIcon.fromTheme("network-transmit"))
         
-        vulnsHeader = QTableWidgetItem("Vulnerabilidades")
-        vulnsHeader.setIcon(QIcon.fromTheme("security-high"))
+        vulns_header = QTableWidgetItem("Vulnerabilidades")
+        vulns_header.setIcon(QIcon.fromTheme("security-high"))
         
-        detailsHeader = QTableWidgetItem("Detalles")
-        detailsHeader.setIcon(QIcon.fromTheme("dialog-information"))
+        details_header = QTableWidgetItem("Detalles")
+        details_header.setIcon(QIcon.fromTheme("dialog-information"))
         
         # Establecer items de encabezado
-        self.recordsTable.setHorizontalHeaderItem(0, dateHeader)
-        self.recordsTable.setHorizontalHeaderItem(1, ipHeader)
-        self.recordsTable.setHorizontalHeaderItem(2, portsHeader)
-        self.recordsTable.setHorizontalHeaderItem(3, vulnsHeader)
-        self.recordsTable.setHorizontalHeaderItem(4, detailsHeader)
+        self.recordsTable.setHorizontalHeaderItem(0, date_header)
+        self.recordsTable.setHorizontalHeaderItem(1, ip_header)
+        self.recordsTable.setHorizontalHeaderItem(2, ports_header)
+        self.recordsTable.setHorizontalHeaderItem(3, vulns_header)
+        self.recordsTable.setHorizontalHeaderItem(4, details_header)
         
         # Configurar el ancho de las columnas
         header = self.recordsTable.horizontalHeader()
@@ -219,80 +225,103 @@ class MainWindow(QMainWindow):
         # Habilitar ordenamiento
         self.recordsTable.setSortingEnabled(True)
         header.setSortIndicatorShown(True)
-        header.sortIndicatorChanged.connect(self.onTableSort)
+        header.sortIndicatorChanged.connect(self.on_table_sort)
         
         # Fecha y hora
-        header.setSectionResizeMode(0, QHeaderView.Interactive)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         self.recordsTable.setColumnWidth(0, 160)
         
         # IP host
-        header.setSectionResizeMode(1, QHeaderView.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         self.recordsTable.setColumnWidth(1, 120)
         
         # Puertos abiertos
-        header.setSectionResizeMode(2, QHeaderView.Interactive)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         self.recordsTable.setColumnWidth(2, 150)
         
         # Vulnerabilidades
-        header.setSectionResizeMode(3, QHeaderView.Interactive)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
         self.recordsTable.setColumnWidth(3, 150)
         
         # Botón de detalles
-        header.setSectionResizeMode(4, QHeaderView.Interactive)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
         self.recordsTable.setColumnWidth(4, 100)
         
         # Permitir que el usuario ajuste el tamaño de las columnas
         header.setStretchLastSection(True)
-        self.recordsTable.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.recordsTable.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         
         # Ajustar altura de las filas
         self.recordsTable.verticalHeader().setDefaultSectionSize(30)
         self.recordsTable.verticalHeader().setMinimumSectionSize(30)
         
-        recordsLayout.addWidget(self.recordsTable)
+        records_layout.addWidget(self.recordsTable)
 
         # Añadir la pestaña de registros
-        self.tabWidget.addTab(recordsTab, "Registros")
+        self.tabWidget.addTab(records_tab, "Registros")
 
         # Realizar búsqueda inicial
-        self.searchRecords()
+        self.search_records()
 
-    def _setupHoneypotTab(self):
+    def _setup_honeypot_tab(self):
         """Configura la pestaña de registros del honeypot"""
-        honeypotTab = QWidget()
-        layout = QVBoxLayout(honeypotTab)
+        honeypot_tab = QWidget()
+        layout = QVBoxLayout(honeypot_tab)
         
         # Frame superior para controles
-        controlFrame = QFrame()
-        controlLayout = QHBoxLayout(controlFrame)
+        control_frame = QFrame()
+        control_layout = QHBoxLayout(control_frame)
         
-        # Etiqueta para mostrar el archivo seleccionado
-        self.honeypotDbLabel = QLabel("No hay base de datos seleccionada")
-        controlLayout.addWidget(self.honeypotDbLabel)
+        # Botón de refrescar (izquierda)
+        refresh_layout = QVBoxLayout()
+        refresh_label = QLabel("Actualizar:")
+        self.honeypotRefreshBtn = QPushButton(" Recargar")
+        self.honeypotRefreshBtn.setIcon(QIcon.fromTheme("view-refresh"))
+        self.honeypotRefreshBtn.clicked.connect(self._refresh_honeypot)
+        refresh_layout.addWidget(refresh_label)
+        refresh_layout.addWidget(self.honeypotRefreshBtn)
+        control_layout.addLayout(refresh_layout)
         
-        # Botón para seleccionar archivo
+        # Filtro de fecha (centro)
+        date_filter_layout = QVBoxLayout()
+        date_label = QLabel("Filtrar por fecha:")
+        self.honeypotDateFilterBtn = QPushButton("Seleccionar fecha")
+        self.honeypotDateFilterBtn.clicked.connect(self._show_honeypot_date_picker)
+        self.honeypotSelectedDate = None
+        date_filter_layout.addWidget(date_label)
+        date_filter_layout.addWidget(self.honeypotDateFilterBtn)
+        control_layout.addLayout(date_filter_layout)
+        
+        # Selector de base de datos (derecha)
+        db_selector_layout = QVBoxLayout()
+        self.db_label = QLabel("Base de datos: No seleccionada")
+        db_selector_layout.addWidget(self.db_label)
+        
+        # Botón de selección
         self.selectHoneypotButton = QPushButton("Seleccionar base de datos")
-        self.selectHoneypotButton.clicked.connect(self._selectHoneypotDb)
-        controlLayout.addWidget(self.selectHoneypotButton)
+        self.selectHoneypotButton.clicked.connect(self._select_honeypot_db)
+        db_selector_layout.addWidget(self.selectHoneypotButton)
         
-        layout.addWidget(controlFrame)
+        control_layout.addLayout(db_selector_layout)
+        
+        layout.addWidget(control_frame)
         
         # Tabla de registros
-        self.honeypotTable = QTableWidget()
-        self.honeypotTable.setEditTriggers(QTableWidget.NoEditTriggers)  # Solo lectura
-        layout.addWidget(self.honeypotTable)
+        self.honeypot_table = QTableWidget()
+        self.honeypot_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)  # Solo lectura
+        layout.addWidget(self.honeypot_table)
         
         # Añadir la pestaña
-        self.tabWidget.addTab(honeypotTab, "Registros Honeypot")
+        self.tabWidget.addTab(honeypot_tab, "Registros honeypot")
 
-    def showDatePicker(self):
+    def show_date_picker(self):
         try:
             # Obtener fechas disponibles
-            available_dates = RecordManager.getAvailableDates()
+            available_dates = RecordManager.get_available_dates()  # Cambia esto al método correcto de tu RecordManager
             
             # Crear el diálogo
             dialog = DatePickerDialog(available_dates, self)
-            dialog.dateSelected.connect(self.onDateSelected)
+            dialog.date_selected.connect(self.on_date_selected)
             
             # Calcular la posición para el diálogo
             button_pos = self.dateFilterBtn.mapToGlobal(self.dateFilterBtn.rect().bottomLeft())
@@ -301,9 +330,9 @@ class MainWindow(QMainWindow):
             # Mostrar el diálogo
             dialog.exec_()
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error al cargar fechas: {str(e)}")
+            self._show_error("Error", f"Error al cargar fechas: {str(e)}")
 
-    def onDateSelected(self, date):
+    def on_date_selected(self, date):
         self.selectedDate = date if date else None
         # Actualizar el texto del botón
         if self.selectedDate:
@@ -311,35 +340,38 @@ class MainWindow(QMainWindow):
         else:
             self.dateFilterBtn.setText("Todas las fechas")
         # Actualizar la búsqueda
-        self.searchRecords()
+        self.search_records()
 
-    def changeTheme(self, theme):
+    def change_theme(self, theme):
         if theme == "Sistema":
             app = QApplication.instance()
-            self.isDarkTheme = app.palette().color(QPalette.Window).lightness() < 128
+            if isinstance(app, QApplication):
+                self.isDarkTheme = app.palette().color(QPalette.ColorRole.Window).lightness() < 128
+            else:
+                self.isDarkTheme = False
         else:
             self.isDarkTheme = theme == "Oscuro"
         
         self.setStyleSheet(DARK_THEME if self.isDarkTheme else LIGHT_THEME)
 
-    def updateNmapCommand(self):
+    def update_nmap_command(self):
         target = self.targetInput.text().strip() or DEFAULT_TARGET
-        scanType = "UDP" if self.scanTypeCombo.currentText() == "UDP" else "TCP"
+        scan_type = "UDP" if self.scanTypeCombo.currentText() == "UDP" else "TCP"
         
         # Base de opciones para el escaneo
-        baseOptions = "-T5 --script vulners"
+        base_options = "-T5 --script vulners"
         
         # Opciones específicas según el tipo de escaneo
-        if scanType == "UDP":
-            options = f"-sUV -O {baseOptions}"  # UDP scan with version detection
+        if scan_type == "UDP":
+            options = f"-sUV -O {base_options}"  # UDP scan with version detection
         else:
-            options = f"-sV -O {baseOptions}"   # TCP scan with version detection
+            options = f"-sV -O {base_options}"   # TCP scan with version detection
             
         # Actualizar el texto del comando
         command = f"nmap {options} {target}"
         self.previewLabel.setText(command)
 
-    def beginScan(self):
+    def begin_scan(self):
         # Deshabilitar botón durante el escaneo
         self.scanButton.setEnabled(False)
         self.scanButton.setText("Escaneando...")
@@ -347,22 +379,23 @@ class MainWindow(QMainWindow):
 
         try:
             target = self.targetInput.text().strip() or DEFAULT_TARGET
-            scanType = "UDP" if self.scanTypeCombo.currentText() == "UDP" else "TCP"
+            scan_type = "UDP" if self.scanTypeCombo.currentText() == "UDP" else "TCP"
 
             # Realizar el escaneo
-            scanResults = NmapScanner.scanTarget(
+            scanner = NmapScanner()
+            scan_results = scanner.scan_target(
                 target, 
-                scanType,
+                scan_type,
                 lambda msg: self.resultArea.append(msg)
             )
 
-            if scanResults:
+            if scan_results:
                 # Procesar resultados
                 processor = ScanResultProcessor(
-                    scanResults,
+                    scan_results,
                     lambda msg: self.resultArea.append(msg)
                 )
-                processor.processResults()
+                processor.process_results()
 
         except Exception as e:
             self.resultArea.append(f"❌ Error durante el escaneo: {e}")
@@ -371,7 +404,7 @@ class MainWindow(QMainWindow):
             self.scanButton.setEnabled(True)
             self.scanButton.setText("Iniciar escaneo")
 
-    def refreshRecords(self):
+    def refresh_records(self):
         """Limpia los filtros y actualiza la lista de registros"""
         # Resetear filtro de fecha
         self.selectedDate = None
@@ -381,19 +414,20 @@ class MainWindow(QMainWindow):
         self.ipFilter.clear()
         
         # Actualizar registros
-        self.searchRecords()
+        self.search_records()
 
-    def searchRecords(self):
+    def search_records(self):
         try:
             # Limpiar tabla actual
             self.recordsTable.setRowCount(0)
 
             # Obtener filtros
-            dateFilter = self.selectedDate if self.selectedDate else None
-            ipFilter = self.ipFilter.text().strip()
+            date_filter = self.selectedDate if self.selectedDate else None
+            ip_filter = self.ipFilter.text().strip()
 
             # Buscar registros
-            records = RecordManager.searchRecords(dateFilter, ipFilter)
+            record_manager = RecordManager()
+            records = record_manager.search_records(date_filter, ip_filter)
 
             # Llenar tabla con resultados
             for record in records:
@@ -405,64 +439,65 @@ class MainWindow(QMainWindow):
                 
                 # Añadir datos
                 # Fecha (ordenable por fecha/hora)
-                fechaItem = QTableWidgetItem(record["fecha"])
-                fechaItem.setData(Qt.UserRole, record["fecha"])  # Para ordenamiento correcto
-                self.recordsTable.setItem(row, 0, fechaItem)
+                fecha_item = QTableWidgetItem(record["fecha"])
+                fecha_item.setData(Qt.ItemDataRole.UserRole, record["fecha"])  # Para ordenamiento correcto
+                self.recordsTable.setItem(row, 0, fecha_item)
                 
                 # IP (ordenable por octetos)
-                ipItem = QTableWidgetItem(record["ip_host"])
+                ip_item = QTableWidgetItem(record["ip_host"])
                 # Convertir IP a número para ordenamiento correcto
                 ip_value = sum(int(x) * (256 ** (3-i)) for i, x in enumerate(record["ip_host"].split('.')))
-                ipItem.setData(Qt.UserRole, ip_value)
-                self.recordsTable.setItem(row, 1, ipItem)
+                ip_item.setData(Qt.ItemDataRole.UserRole, ip_value)
+                self.recordsTable.setItem(row, 1, ip_item)
                 
                 # Puertos (ordenable numéricamente)
-                puertosItem = QTableWidgetItem()
-                puertosItem.setData(Qt.DisplayRole, str(record["puertos_abiertos"]))
-                puertosItem.setData(Qt.UserRole, int(record["puertos_abiertos"]))
-                self.recordsTable.setItem(row, 2, puertosItem)
+                puertos_item = QTableWidgetItem()
+                puertos_item.setData(Qt.ItemDataRole.DisplayRole, str(record["puertos_abiertos"]))
+                puertos_item.setData(Qt.ItemDataRole.UserRole, int(record["puertos_abiertos"]))
+                self.recordsTable.setItem(row, 2, puertos_item)
                 
                 # Vulnerabilidades (ordenable numéricamente)
-                vulnsItem = QTableWidgetItem()
-                vulnsItem.setData(Qt.DisplayRole, str(record["vulnerabilidades"]))
-                vulnsItem.setData(Qt.UserRole, int(record["vulnerabilidades"]))
-                self.recordsTable.setItem(row, 3, vulnsItem)
+                vulns_item = QTableWidgetItem()
+                vulns_item.setData(Qt.ItemDataRole.DisplayRole, str(record["vulnerabilidades"]))
+                vulns_item.setData(Qt.ItemDataRole.UserRole, int(record["vulnerabilidades"]))
+                self.recordsTable.setItem(row, 3, vulns_item)
                 
                 # Reactivar ordenamiento
                 self.recordsTable.setSortingEnabled(True)
                 
                 # Botón de detalles
-                detailsButton = QPushButton("Ver más detalles")
-                detailsButton.setFixedHeight(27)
-                detailsButton.setStyleSheet("""
+                details_button = QPushButton("Ver más detalles")
+                details_button.setFixedHeight(27)
+                details_button.setStyleSheet("""
                     QPushButton {
                         padding: 2px 8px;  /* padding vertical: 2px, horizontal: 8px */
                     }
                 """)
-                detailsButton.clicked.connect(
-                    lambda checked, r=record: self.showScanDetails(r["id"], r["ip_host"])
+                details_button.clicked.connect(
+                    lambda checked, r=record: self.show_scan_details(r["id"], r["ip_host"])
                 )
-                self.recordsTable.setCellWidget(row, 4, detailsButton)
+                self.recordsTable.setCellWidget(row, 4, details_button)
 
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error al buscar registros: {str(e)}")
+            self._show_error("Error", f"Error al buscar registros: {str(e)}")
 
-    def onTableSort(self, logicalIndex, order):
+    def on_table_sort(self, logical_index, order):
         """Maneja el evento de ordenamiento de la tabla"""
         # Guardar el estado de ordenamiento actual
-        self.recordsTable.horizontalHeader().setSortIndicator(logicalIndex, order)
+        self.recordsTable.horizontalHeader().setSortIndicator(logical_index, order)
 
-    def showScanDetails(self, scanId: int, hostIp: str):
+    def show_scan_details(self, scan_id: int, host_ip: str):
         try:
             # Limpiar las ventanas cerradas de la lista
             self.detailWindows = [w for w in self.detailWindows if not w.isHidden()]
             
             # Obtener detalles del escaneo
-            scanDetails = RecordManager.getScanDetails(scanId, hostIp)
+            record_manager = RecordManager()
+            scan_details = record_manager.get_scan_details(scan_id, host_ip)
             
             # Crear diálogo como ventana independiente
-            dialog = ScanDetailsDialog(scanDetails)  # No pasamos el parent
-            dialog.setWindowTitle(f"Detalles del escaneo - {hostIp}")
+            dialog = ScanDetailsDialog(scan_details)  # No pasamos el parent
+            dialog.setWindowTitle(f"Detalles del escaneo - {host_ip}")
             
             # Configurar como ventana independiente
             dialog.setWindowFlags(
@@ -483,9 +518,9 @@ class MainWindow(QMainWindow):
             dialog.show()  # Usar show() en lugar de exec_() para no bloquear
             
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error al mostrar detalles: {str(e)}")
+            self._show_error("Error", f"Error al mostrar detalles: {str(e)}")
 
-    def openRemoteConfig(self):
+    def open_remote_config(self):
         try:
             # Crear diálogo de configuración remota
             dialog = RemoteConfigDialog(self)
@@ -494,9 +529,9 @@ class MainWindow(QMainWindow):
             # Mostrar diálogo de forma modal
             dialog.exec_()
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error al abrir configuración remota: {str(e)}")
+            self._show_error("Error", f"Error al abrir configuración remota: {str(e)}")
 
-    def showRemoteConfig(self):
+    def show_remote_config(self):
         """Muestra el diálogo de configuración/estado de conexión remota"""
         # Verificar si ya hay una conexión activa intentando usar el SFTP
         try:
@@ -510,58 +545,56 @@ class MainWindow(QMainWindow):
                     return
                 except Exception:
                     # La conexión está rota, limpiarla
-                    self.remote_manager.disconnect()
+                    self.remote_manager.close_connections()
             
             # No hay conexión o se perdió, mostrar diálogo de configuración
             dialog = RemoteConfigDialog(self)
-            # Establecer el RemoteDBManager y conectar señales
-            dialog.setRemoteManager(self.remote_manager)
-            dialog.connectionEstablished.connect(lambda: self.remote_manager.syncProgress.emit("✅ Conexión establecida"))
+            dialog.set_remote_manager(self.remote_manager)
             dialog.exec_()
             
         except Exception as e:
             # Si hay cualquier error inesperado
-            QMessageBox.critical(self, "Error", f"Error al verificar la conexión: {str(e)}")
-            self.remote_manager.disconnect()
+            self._show_error("Error", f"Error al verificar la conexión: {str(e)}")
+            self.remote_manager.close_connections()
 
-    def _selectHoneypotDb(self):
+    def _select_honeypot_db(self):
         """Abre el diálogo para seleccionar una base de datos remota del honeypot"""
         try:
-            if not self.remote_manager.isConnected():
-                QMessageBox.warning(
-                    self,
+            if not self.remote_manager.is_connected():
+                self._show_warning(
                     "Conexión remota requerida",
                     "Debe establecer una conexión remota primero para acceder a las bases de datos"
                 )
-                self.showRemoteConfig()
                 return
             
             dialog = RemoteFileSelector(self.remote_manager, self)
-            dialog.fileSelected.connect(self._loadHoneypotDb)
+            dialog.file_selected.connect(self._load_honeypot_db)
             
             # Mostrar el diálogo
             dialog.exec_()
 
         except Exception as e:
-            QMessageBox.critical(
-                self,
+            self._show_error(
                 "Error",
                 f"Error al abrir el selector de archivos: {str(e)}"
             )
 
-    def _loadHoneypotDb(self, remote_path):
+    def _load_honeypot_db(self, remote_path):
         """Carga una base de datos del honeypot desde la ruta remota especificada"""
         try:
             # Crear directorio temporal si no existe
-            import tempfile
-            import os
             temp_dir = os.path.join(tempfile.gettempdir(), "picir_honeypot")
             os.makedirs(temp_dir, exist_ok=True)
             
-            # Verificar que sea un archivo SQLite válido
+            # Verificar que sea un archivo SQLite válido y tenga el nombre correcto
             filename = os.path.basename(remote_path)
+            name_without_ext = os.path.splitext(filename)[0].lower()
+            
             if not self._is_sqlite_file(filename):
                 raise Exception("El archivo seleccionado no es una base de datos SQLite válida")
+                
+            if name_without_ext != "dionaea":
+                raise Exception("La base de datos seleccionada no es una base de datos válida del honeypot")
             
             # Generar nombre para archivo temporal local
             local_path = os.path.join(temp_dir, filename)
@@ -580,148 +613,119 @@ class MainWindow(QMainWindow):
             conn = sqlite3.connect(local_path)
             cursor = conn.cursor()
             
-            # Primero verificar si las tablas existen
-            cursor.execute("""
-                SELECT name FROM sqlite_master 
-                WHERE type='table' AND name IN ('escaneos', 'escaneos_host', 'escaneos_puertos', 'vulnerabilidades');
-            """)
-            existing_tables = [row[0] for row in cursor.fetchall()]
+            # Verificar que exista la tabla connections
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='connections';")
+            if not cursor.fetchone():
+                raise Exception("El archivo seleccionado no es una base de datos válida del honeypot")
             
-            if 'escaneos' in existing_tables and 'escaneos_host' in existing_tables:
-                # Consulta JOIN para obtener toda la información relacionada
-                query = """
-                    SELECT 
-                        e.fecha_hora,
-                        h.id_host,
-                        h.direccion_mac,
-                        h.sistema_operativo,
-                        e.comando,
-                        e.tiempo_respuesta,
-                        p.puerto,
-                        p.protocolo,
-                        p.estado,
-                        p.servicio,
-                        p.version,
-                        v.codigo_vulnerabilidad,
-                        v.explotable,
-                        v.cvss,
-                        v.descripcion
-                    FROM escaneos e
-                    JOIN escaneos_host h ON e.id = h.id_escaneo
-                    LEFT JOIN escaneos_puertos p ON h.id_escaneo = p.id_escaneo AND h.id_host = p.id_host
-                    LEFT JOIN vulnerabilidades v ON p.id_escaneo = v.id_escaneo 
-                        AND p.id_host = v.id_host 
-                        AND p.puerto = v.puerto 
-                        AND p.protocolo = v.protocolo
-                    ORDER BY e.fecha_hora DESC, h.id_host, p.puerto;
-                """
-            else:
-                # Si no existen las tablas, hacer una consulta simple
-                table_name = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1").fetchone()[0]
-                query = f"SELECT * FROM {table_name};"
+            # Consulta para obtener los datos ordenados por fecha descendente
+            query = """
+                SELECT 
+                    connection_timestamp,
+                    connection_transport,
+                    local_port,
+                    connection_protocol,
+                    local_host,
+                    remote_host,
+                    remote_hostname,
+                    remote_port
+                FROM connections
+                ORDER BY connection_timestamp DESC;
+            """
             
             cursor.execute(query)
             records = cursor.fetchall()
             
             # Definir las columnas que queremos mostrar
             columns = [
-                "Fecha y Hora", "Host", "MAC", "Sistema Operativo",
-                "Puerto", "Protocolo", "Estado", "Servicio", "Versión",
-                "Vulnerabilidad", "CVSS", "Explotable"
+                "Fecha y hora", "Protocolo", "Puerto", "Servicio", 
+                "IP local", "IP remoto", "Nombre remoto", "Puerto remoto"
             ]
             
             # Configurar la tabla
-            self.honeypotTable.setColumnCount(len(columns))
-            self.honeypotTable.setHorizontalHeaderLabels(columns)
+            self.honeypot_table.setColumnCount(len(columns))
+            self.honeypot_table.setHorizontalHeaderLabels(columns)
             
             # Ajustar tamaño y comportamiento de las columnas
-            header = self.honeypotTable.horizontalHeader()
+            header = self.honeypot_table.horizontalHeader()
             header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
             
             # Establecer anchos iniciales para las columnas
             column_widths = {
-                0: 150,  # Fecha y Hora
-                1: 120,  # Host
-                2: 120,  # MAC
-                3: 150,  # Sistema Operativo
-                4: 70,   # Puerto
-                5: 80,   # Protocolo
-                6: 80,   # Estado
-                7: 100,  # Servicio
-                8: 100,  # Versión
-                9: 150,  # Vulnerabilidad
-                10: 70,  # CVSS
-                11: 80,  # Explotable
+                0: 180,  # Fecha y Hora
+                1: 100,  # Protocolo (TCP/UDP)
+                2: 100,  # Puerto local
+                3: 100,  # Servicio (SMB/RDP)
+                5: 120,  # IP local
+                6: 120,  # IP remoto
+                7: 150,  # Nombre remoto
+                8: 100,  # Puerto remoto
             }
             
             for col, width in column_widths.items():
-                self.honeypotTable.setColumnWidth(col, width)
+                self.honeypot_table.setColumnWidth(col, width)
             
             # Permitir ordenamiento
-            self.honeypotTable.setSortingEnabled(True)
+            self.honeypot_table.setSortingEnabled(True)
             header.setSortIndicatorShown(True)
             
             # Eliminar filas vacías
-            for row in range(self.honeypotTable.rowCount() - 1, -1, -1):
+            for row in range(self.honeypot_table.rowCount() - 1, -1, -1):
                 is_empty = True
-                for col in range(self.honeypotTable.columnCount()):
-                    item = self.honeypotTable.item(row, col)
+                for col in range(self.honeypot_table.columnCount()):
+                    item = self.honeypot_table.item(row, col)
                     if item and item.text().strip():
                         is_empty = False
                         break
                 if is_empty:
-                    self.honeypotTable.removeRow(row)
+                    self.honeypot_table.removeRow(row)
             
             # Procesar y mostrar los datos
-            current_row = -1
-            current_host = None
-            self.honeypotTable.setRowCount(len(records))
+            self.honeypot_table.setRowCount(len(records))
             
-            if 'escaneos' in existing_tables and 'escaneos_host' in existing_tables:
-                for record in records:
-                    # Si es un nuevo host o la primera fila
-                    if current_host != record[1]:  # record[1] es id_host
-                        current_row += 1
-                        current_host = record[1]
-                        
-                        # Fecha y Hora
-                        self.honeypotTable.setItem(current_row, 0, QTableWidgetItem(str(record[0] or "")))
-                        # Host (IP)
-                        self.honeypotTable.setItem(current_row, 1, QTableWidgetItem(str(record[1] or "")))
-                        # MAC
-                        mac_addr = str(record[2] or "No detectada").strip()
-                        self.honeypotTable.setItem(current_row, 2, QTableWidgetItem(mac_addr))
-                        # Sistema Operativo
-                        os_info = str(record[3] or "No detectado").strip()
-                        self.honeypotTable.setItem(current_row, 3, QTableWidgetItem(os_info))
-                        # Puerto
-                        self.honeypotTable.setItem(current_row, 4, QTableWidgetItem(str(record[6] or "")))
-                        # Protocolo
-                        self.honeypotTable.setItem(current_row, 5, QTableWidgetItem(str(record[7] or "")))
-                        # Estado
-                        self.honeypotTable.setItem(current_row, 6, QTableWidgetItem(str(record[8] or "")))
-                        # Servicio
-                        self.honeypotTable.setItem(current_row, 7, QTableWidgetItem(str(record[9] or "")))
-                        # Versión
-                        self.honeypotTable.setItem(current_row, 8, QTableWidgetItem(str(record[10] or "")))
-                        # Vulnerabilidad
-                        self.honeypotTable.setItem(current_row, 9, QTableWidgetItem(str(record[11] or "")))
-                        # CVSS
-                        self.honeypotTable.setItem(current_row, 10, QTableWidgetItem(str(record[13] or "")))
-                        # Explotable
-                        explotable = "Sí" if record[12] else "No" if record[12] is not None else ""
-                        self.honeypotTable.setItem(current_row, 11, QTableWidgetItem(explotable))
-            else:
-                # Si no es una base de datos de escaneos, mostrar los datos tal cual
-                for row, record in enumerate(records):
-                    for col, value in enumerate(record):
-                        self.honeypotTable.setItem(row, col, QTableWidgetItem(str(value or "")))
+            for row, record in enumerate(records):
+                # Convertir timestamp Unix a fecha legible
+                timestamp = datetime.fromtimestamp(record[0]).strftime('%Y-%m-%d %H:%M:%S')
+                
+                # Convertir protocolo de transporte a mayúsculas
+                transport = record[1].upper() if record[1] else "Desconocido"
+                
+                # Puerto local
+                local_port = str(record[2]) if record[2] is not None else "Desconocido"
+                
+                # Convertir protocolo de conexión
+                protocol = {
+                    'smbd': 'SMB',
+                    'Blackhole': 'RDP'
+                }.get(record[3], record[3] or "Desconocido")
+                
+                # Host local
+                local_host = record[4] or "Desconocido"
+                
+                # Host remoto
+                remote_host = record[5] or "Desconocido"
+                
+                # Nombre de host remoto
+                remote_hostname = record[6] or "Desconocido"
+                
+                # Puerto remoto
+                remote_port = str(record[7]) if record[7] is not None else "Desconocido"
+                
+                # Añadir datos a la tabla
+                self.honeypot_table.setItem(row, 0, QTableWidgetItem(timestamp))
+                self.honeypot_table.setItem(row, 1, QTableWidgetItem(transport))
+                self.honeypot_table.setItem(row, 2, QTableWidgetItem(local_port))
+                self.honeypot_table.setItem(row, 3, QTableWidgetItem(protocol))
+                self.honeypot_table.setItem(row, 4, QTableWidgetItem(local_host))
+                self.honeypot_table.setItem(row, 5, QTableWidgetItem(remote_host))
+                self.honeypot_table.setItem(row, 6, QTableWidgetItem(remote_hostname))
+                self.honeypot_table.setItem(row, 7, QTableWidgetItem(remote_port))
             
             # Ajustar tamaño de columnas
-            self.honeypotTable.resizeColumnsToContents()
+            self.honeypot_table.resizeColumnsToContents()
             
-            # Actualizar etiqueta
-            self.honeypotDbLabel.setText(f"Base de datos: {os.path.basename(remote_path)}")
+            # Actualizar etiqueta con el estado de la base de datos
+            self.db_label.setText("Base de datos: Seleccionada y cargada")
             
             # Limpiar recursos
             cursor.close()
@@ -730,9 +734,18 @@ class MainWindow(QMainWindow):
             # Eliminar archivo temporal
             os.remove(local_path)
             
+            # Aplicar filtros actuales
+            self._apply_honeypot_filters()
+            
+            # Mostrar mensaje de éxito
+            self._show_message(
+                "Éxito",
+                "Base de datos del honeypot cargada exitosamente",
+                QMessageBox.Icon.Information
+            )
+            
         except Exception as e:
-            QMessageBox.critical(
-                self,
+            self._show_error(
                 "Error",
                 f"Error al cargar la base de datos del honeypot: {str(e)}"
             )
@@ -740,3 +753,129 @@ class MainWindow(QMainWindow):
     def _is_sqlite_file(self, filename):
         """Verifica si un nombre de archivo tiene una extensión válida de SQLite"""
         return filename.lower().endswith(('.db', '.sqlite', '.db3', '.sqlite3'))
+
+    def _refresh_honeypot(self):
+        """Recarga los datos del honeypot desde la base de datos actual."""
+        try:
+            current_db = self.db_label.text()
+            if "No hay base de datos seleccionada" in current_db:
+                self._show_warning(
+                    "Advertencia",
+                    "Primero debe seleccionar una base de datos del honeypot"
+                )
+                return
+                
+            # Resetear el filtro de fecha
+            self.honeypotSelectedDate = None
+            self.honeypotDateFilterBtn.setText("Seleccionar fecha")
+            
+            # Recargar la base de datos actual
+            remote_path = current_db.replace("Base de datos: ", "")
+            self._load_honeypot_db(remote_path)
+            
+        except Exception as e:
+            self._show_error(
+                "Error",
+                f"Error al recargar los datos del honeypot: {str(e)}"
+            )
+
+    def _show_honeypot_date_picker(self):
+        """Muestra el selector de fecha para filtrar los registros del honeypot."""
+        try:
+            if not self.honeypot_table.rowCount():
+                self._show_warning(
+                    "Advertencia",
+                    "No hay datos para filtrar"
+                )
+                return
+                
+            # Obtener fechas únicas de la tabla
+            unique_dates = set()
+            for row in range(self.honeypot_table.rowCount()):
+                item = self.honeypot_table.item(row, 0)
+                if item is not None and item.text():
+                    date_str = item.text().split()[0]  # Solo la fecha, sin hora
+                    unique_dates.add(date_str)
+            
+            # Ordenar fechas
+            available_dates = sorted(list(unique_dates), reverse=True)
+            
+            # Crear diálogo
+            dialog = DatePickerDialog(available_dates, self)
+            dialog.date_selected.connect(self._on_honeypot_date_selected)
+            
+            # Calcular posición para el diálogo
+            button_pos = self.honeypotDateFilterBtn.mapToGlobal(self.honeypotDateFilterBtn.rect().bottomLeft())
+            dialog.move(button_pos)
+            
+            # Mostrar diálogo
+            dialog.exec_()
+            
+        except Exception as e:
+            self._show_error(
+                "Error",
+                f"Error al mostrar el selector de fecha: {str(e)}"
+            )
+
+    def _on_honeypot_date_selected(self, date):
+        """Maneja la selección de fecha para el filtro del honeypot.
+        
+        Args:
+            date (str): Fecha seleccionada en formato YYYY-MM-DD o cadena vacía para mostrar todo
+        """
+        self.honeypotSelectedDate = date
+        
+        # Actualizar texto del botón
+        if date:
+            self.honeypotDateFilterBtn.setText(f"Fecha: {date}")
+        else:
+            self.honeypotDateFilterBtn.setText("Todas las fechas")
+        
+        # Aplicar filtro
+        self._apply_honeypot_filters()
+
+    def _show_message(self, title: str, message: str, icon: QMessageBox.Icon = QMessageBox.Icon.Information):
+        """Muestra un mensaje.
+        
+        Args:
+            title (str): Título del mensaje
+            message (str): Contenido del mensaje
+            icon (QMessageBox.Icon): Icono a mostrar (Information, Warning, Critical)
+        """
+        # Hacemos el mensaje corto más ancho añadiendo espacios a los lados
+        padded_message = message.center(50)  # Centrar en 50 caracteres con espacios
+        
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(icon)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(f"{padded_message}\n")
+        msg_box.setMinimumWidth(400)
+        msg_box.exec_()
+
+    def _show_error(self, title: str, message: str):
+        """Muestra un mensaje de error con formato correcto."""
+        self._show_message(title, message, QMessageBox.Icon.Critical)
+
+    def _show_warning(self, title: str, message: str):
+        """Muestra un mensaje de advertencia con formato correcto."""
+        self._show_message(title, message, QMessageBox.Icon.Warning)
+
+    def _apply_honeypot_filters(self):
+        """Aplica los filtros actuales a la tabla del honeypot."""
+        try:
+            # Mostrar/ocultar filas según el filtro de fecha
+            for row in range(self.honeypot_table.rowCount()):
+                date_item = self.honeypot_table.item(row, 0)
+                if date_item:
+                    should_show = True
+                    if self.honeypotSelectedDate:
+                        row_date = date_item.text().split()[0]  # Solo la fecha, sin hora
+                        should_show = row_date == self.honeypotSelectedDate
+                    
+                    self.honeypot_table.setRowHidden(row, not should_show)
+                    
+        except Exception as e:
+            self._show_error(
+                "Error",
+                f"Error al aplicar filtros: {str(e)}"
+            )

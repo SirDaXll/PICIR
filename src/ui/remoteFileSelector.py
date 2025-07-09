@@ -8,7 +8,7 @@ from PySide6.QtCore import Signal
 import os
 
 class RemoteFileSelector(QDialog):
-    fileSelected = Signal(str)  # Emite la ruta del archivo seleccionado
+    file_selected = Signal(str)  # Emite la ruta del archivo seleccionado
 
     def __init__(self, remote_manager, parent=None):
         super().__init__(parent)
@@ -138,7 +138,7 @@ class RemoteFileSelector(QDialog):
             item_type = current_item.data(0, 257)
             
             if item_type == "file":
-                self.fileSelected.emit(path)
+                self.file_selected.emit(path)
                 self.accept()
 
     def cleanup(self):
@@ -150,7 +150,7 @@ class RemoteFileSelector(QDialog):
                 pass  # Ignorar errores al cerrar
             self.sftp = None
 
-    def closeEvent(self, event):
+    def close_event(self, event):
         """Se llama cuando se cierra el diálogo"""
         self.cleanup()
         super().closeEvent(event)
