@@ -2,7 +2,8 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayo
                              QWidget, QPushButton, QLineEdit, QTextEdit, QComboBox,
                              QLabel, QFrame, QTabWidget, QTableWidget, QTableWidgetItem, 
                              QHeaderView, QMessageBox, QAbstractItemView, QDialog,
-                             QTreeWidget, QTabBar, QSpinBox, QDateEdit)
+                             QTreeWidget, QTabBar, QSpinBox, QDateEdit, QGroupBox,
+                             QCheckBox)
 from PySide6.QtGui import (QRegularExpressionValidator, QIcon, QCursor,
                            QPalette, QColor)
 from PySide6.QtCore import QRegularExpression, Qt, QSize
@@ -70,6 +71,26 @@ class MainWindow(QMainWindow):
             }
         """)
         
+        # Crear el botón de ayuda con el mismo estilo que el botón de tema
+        self.help_button = QPushButton()
+        self.help_button.setFixedSize(32, 32)
+        self.help_button.setIconSize(QSize(24, 24))
+        self.help_button.clicked.connect(self.show_help)
+        self.help_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.help_button.setIcon(QIcon.fromTheme("help-about"))
+        self.help_button.setToolTip("Ayuda")
+        self.help_button.setStyleSheet("""
+            QPushButton {
+                border: none;
+                background: transparent;
+                padding: 4px;
+            }
+            QPushButton:hover {
+                background: rgba(128, 128, 128, 0.2);
+                border-radius: 16px;
+            }
+        """)
+        
         # Actualizar el tema inicial y el icono
         self.current_theme = "light"
         self.update_theme_button()
@@ -103,8 +124,12 @@ class MainWindow(QMainWindow):
     def _setup_top_bar(self, main_layout):
         top_bar = QHBoxLayout()
         
-        # Lado izquierdo: Botón de tema
-        top_bar.addWidget(self.theme_button)
+        # Lado izquierdo: Botones de tema y ayuda
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addWidget(self.theme_button)
+        buttons_layout.addWidget(self.help_button)
+        buttons_layout.setSpacing(4)  # Espacio entre botones
+        top_bar.addLayout(buttons_layout)
         
         # Espacio flexible en el medio
         top_bar.addStretch()
@@ -134,12 +159,49 @@ class MainWindow(QMainWindow):
         input_layout.addWidget(target_label)
         input_layout.addWidget(self.targetInput)
 
-        # Tipo de escaneo
-        scan_type_label = QLabel("Tipo de escaneo:")
-        self.scanTypeCombo = QComboBox()
-        self.scanTypeCombo.addItems(["TCP", "UDP"])
-        input_layout.addWidget(scan_type_label)
-        input_layout.addWidget(self.scanTypeCombo)
+        # Opciones de escaneo
+        options_group = QGroupBox("Opciones de escaneo:")
+        options_layout = QVBoxLayout()
+        
+        # Opciones de escaneo disponibles
+        self.sV_check = QCheckBox("Detectar versión de servicios (-sV)")
+        self.sV_check.setChecked(True)
+        self.sV_check.stateChanged.connect(self.update_nmap_command)
+        options_layout.addWidget(self.sV_check)
+        
+        self.O_check = QCheckBox("Detectar sistema operativo (-O) (Requiere sudo)")
+        self.O_check.setChecked(True)
+        self.O_check.stateChanged.connect(self.update_nmap_command)
+        options_layout.addWidget(self.O_check)
+        
+        self.vulners_check = QCheckBox("Detectar vulnerabilidades (--script vulners) (Requiere internet)")
+        self.vulners_check.setChecked(True)
+        self.vulners_check.stateChanged.connect(self.update_nmap_command)
+        options_layout.addWidget(self.vulners_check)
+        
+        self.sU_check = QCheckBox("Escanear puertos UDP (-sU) (Requiere sudo)")
+        self.sU_check.stateChanged.connect(self.update_nmap_command)
+        options_layout.addWidget(self.sU_check)
+        
+        self.all_ports_check = QCheckBox("Escanear todos los puertos (-p 1-65535)")
+        self.all_ports_check.stateChanged.connect(self.update_nmap_command)
+        options_layout.addWidget(self.all_ports_check)
+        
+        # Velocidad de escaneo
+        speed_layout = QHBoxLayout()
+        speed_label = QLabel("Velocidad de escaneo:")
+        self.speed_combo = QComboBox()
+        self.speed_combo.addItems(["T1 (Sigiloso)", "T2 (Educado)", "T3 (Normal)", 
+                              "T4 (Agresivo)", "T5 (Insano)"])
+        self.speed_combo.setCurrentText("T5 (Insano)")  # Por defecto T5
+        self.speed_combo.currentTextChanged.connect(self.update_nmap_command)
+        speed_layout.addWidget(speed_label)
+        speed_layout.addWidget(self.speed_combo)
+        speed_layout.addStretch()
+        options_layout.addLayout(speed_layout)
+        
+        options_group.setLayout(options_layout)
+        input_layout.addWidget(options_group)
 
         # Preview del comando
         preview_frame_label = QLabel("Vista previa del comando:")
@@ -151,7 +213,6 @@ class MainWindow(QMainWindow):
 
         # Conectar señales para actualizar el preview
         self.targetInput.textChanged.connect(self.update_nmap_command)
-        self.scanTypeCombo.currentTextChanged.connect(self.update_nmap_command)
         
         # Botón de escaneo
         self.scanButton = QPushButton("Iniciar escaneo")
@@ -392,9 +453,29 @@ class MainWindow(QMainWindow):
         if self.current_theme == "light":
             self.current_theme = "dark"
             self.setStyleSheet(DARK_THEME)
+            # Actualizar colores para modo oscuro
+            checkbox_style = "QCheckBox { color: white; }"
+            groupbox_style = "QGroupBox { color: white; }"
+            label_style = "QLabel { color: white; }"
         else:
             self.current_theme = "light"
             self.setStyleSheet(LIGHT_THEME)
+            # Actualizar colores para modo claro
+            checkbox_style = "QCheckBox { color: black; }"
+            groupbox_style = "QGroupBox { color: black; }"
+            label_style = "QLabel { color: black; }"
+        
+        # Aplicar estilos a los elementos de la interfaz
+        for widget in self.findChildren(QCheckBox):
+            widget.setStyleSheet(checkbox_style)
+            
+        for widget in self.findChildren(QGroupBox):
+            widget.setStyleSheet(groupbox_style)
+            
+        for widget in self.findChildren(QLabel):
+            if "bold" in widget.styleSheet():
+                widget.setStyleSheet(widget.styleSheet().replace("color: black;", "").replace("color: white;", "") + 
+                                  ("color: white;" if self.current_theme == "dark" else "color: black;"))
         
         self.update_theme_button()
 
@@ -405,19 +486,33 @@ class MainWindow(QMainWindow):
 
     def update_nmap_command(self):
         target = self.targetInput.text().strip() or DEFAULT_TARGET
-        scan_type = "UDP" if self.scanTypeCombo.currentText() == "UDP" else "TCP"
         
-        # Base de opciones para el escaneo
-        base_options = "-T5 --script vulners"
+        # Inicializar lista vacía de opciones
+        options = []
         
-        # Opciones específicas según el tipo de escaneo
-        if scan_type == "UDP":
-            options = f"-sUV -O {base_options}"  # UDP scan with version detection
-        else:
-            options = f"-sV -O {base_options}"   # TCP scan with version detection
+        # Agregar opciones según el estado de los checkboxes
+        if self.sV_check.isChecked():
+            options.append("-sV")
+        
+        if self.O_check.isChecked():
+            options.append("-O")
             
-        # Actualizar el texto del comando
-        command = f"nmap {options} {target}"
+        if self.vulners_check.isChecked():
+            options.append("--script vulners")
+        
+        # Opciones adicionales seleccionadas
+        if self.sU_check.isChecked():
+            options.append("-sU")
+            
+        if self.all_ports_check.isChecked():
+            options.append("-p 1-65535")
+        
+        # Velocidad de escaneo
+        speed = self.speed_combo.currentText().split()[0]  # Obtener solo el "TX"
+        options.append(f"-{speed}")
+        
+        # Unir todas las opciones
+        command = f"nmap {' '.join(options)} {target}"
         self.previewLabel.setText(command)
 
     def begin_scan(self):
@@ -428,14 +523,37 @@ class MainWindow(QMainWindow):
 
         try:
             target = self.targetInput.text().strip() or DEFAULT_TARGET
-            scan_type = "UDP" if self.scanTypeCombo.currentText() == "UDP" else "TCP"
 
-            # Realizar el escaneo
+            # Recopilar las opciones seleccionadas
+            options = []
+            
+            # Agregar opciones según el estado de los checkboxes
+            if self.sV_check.isChecked():
+                options.append("-sV")
+            
+            if self.O_check.isChecked():
+                options.append("-O")
+                
+            if self.vulners_check.isChecked():
+                options.append("--script vulners")
+            
+            if self.sU_check.isChecked():
+                options.append("-sU")
+                
+            if self.all_ports_check.isChecked():
+                options.append("-p 1-65535")
+            
+            # Agregar velocidad de escaneo
+            speed = self.speed_combo.currentText().split()[0]  # Obtener solo el "TX"
+            options.append(f"-{speed}")
+
+            # Realizar el escaneo con las opciones seleccionadas
             scanner = NmapScanner()
             scan_results = scanner.scan_target(
-                target, 
-                scan_type,
-                lambda msg: self.resultArea.append(msg)
+                target=target,
+                scan_type="TCP",  # TCP es el tipo de escaneo por defecto
+                result_callback=lambda msg: self.resultArea.append(msg),
+                options=options  # Pasar las opciones al scanner
             )
 
             if scan_results:
@@ -506,9 +624,24 @@ class MainWindow(QMainWindow):
                 self.recordsTable.setItem(row, 2, puertos_item)
                 
                 # Vulnerabilidades (ordenable numéricamente)
+                total_vulns = record["vulnerabilidades"]
+                explotables = record["vulnerabilidades_explotables"]
+                
+                # Mostrar el conteo de explotables solo si existen
+                if total_vulns > 0:
+                    vulns_display = f"{total_vulns} ({explotables} críticos)" if explotables > 0 else str(total_vulns)
+                else:
+                    vulns_display = "0"
+                    
                 vulns_item = QTableWidgetItem()
-                vulns_item.setData(Qt.ItemDataRole.DisplayRole, str(record["vulnerabilidades"]))
-                vulns_item.setData(Qt.ItemDataRole.UserRole, int(record["vulnerabilidades"]))
+                vulns_item.setData(Qt.ItemDataRole.DisplayRole, vulns_display)
+                vulns_item.setData(Qt.ItemDataRole.UserRole, int(total_vulns))  # Ordenar por total de vulnerabilidades
+                
+                # Aplicar color rojo si hay vulnerabilidades explotables
+                if explotables > 0:
+                    vulns_item.setBackground(QColor(255, 200, 200))  # Rojo claro
+                
+                vulns_item.setToolTip(f"Total: {total_vulns}\nExplotables: {explotables}")
                 self.recordsTable.setItem(row, 3, vulns_item)
                 
                 # Reactivar ordenamiento
@@ -1120,3 +1253,62 @@ class MainWindow(QMainWindow):
                 
         # Forzar actualización visual
         dialog.update()
+
+    def show_help(self):
+        """Muestra el mensaje de ayuda correspondiente a la pestaña actual."""
+        current_tab = self.tabWidget.currentWidget()
+        help_texts = {
+            "Escaneo": """
+<b>Ayuda - Pestaña de Escaneo</b><br><br>
+Esta pestaña permite realizar escaneos de red usando Nmap. Aquí puedes:<br><br>
+• Ingresar una IP o rango de IPs para escanear<br>
+• Seleccionar diferentes opciones de escaneo:<br>
+  - Detectar versión de servicios (-sV)<br>
+  - Detectar sistema operativo (-O) [Requiere sudo]<br>
+  - Detectar vulnerabilidades (--script vulners) [Requiere internet]<br>
+  - Escanear puertos UDP (-sU) [Requiere sudo]<br>
+  - Escanear todos los puertos (-p 1-65535)<br>
+• Ajustar la velocidad del escaneo (T1-T5)<br>
+• Ver una vista previa del comando Nmap<br>
+• Ver los resultados del escaneo en tiempo real
+            """,
+            "Registros": """
+<b>Ayuda - Pestaña de Registros</b><br><br>
+Esta pestaña muestra el historial de escaneos realizados. Puedes:<br><br>
+• Ver todos los escaneos anteriores<br>
+• Filtrar registros por fecha<br>
+• Filtrar por dirección IP<br>
+• Ver detalles completos de cada escaneo<br>
+• Ordenar resultados por cualquier columna<br>
+• Ver estadísticas como puertos abiertos y vulnerabilidades
+            """,
+            "Registros honeypot": """
+<b>Ayuda - Pestaña de Registros Honeypot</b><br><br>
+Esta pestaña permite visualizar los registros de un honeypot. Aquí puedes:<br><br>
+• Conectarte a una base de datos remota<br>
+• Ver intentos de conexión al honeypot<br>
+• Filtrar registros por fecha<br>
+• Ver detalles como:<br>
+  - Protocolo usado<br>
+  - Puertos atacados<br>
+  - IPs de origen<br>
+  - Servicios objetivos
+            """
+        }
+
+        current_tab_name = self.tabWidget.tabText(self.tabWidget.currentIndex())
+        help_text = help_texts.get(current_tab_name, "No hay ayuda disponible para esta pestaña.")
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle(f"Ayuda - {current_tab_name}")
+        msg_box.setTextFormat(Qt.TextFormat.RichText)
+        msg_box.setText(help_text)
+        msg_box.setIcon(QMessageBox.Icon.Information)
+
+        # Hacer el diálogo más ancho
+        msg_box.setMinimumWidth(500)
+        
+        # Configurar el diálogo con el tema actual
+        self._configure_dialog(msg_box)
+        
+        msg_box.exec_()

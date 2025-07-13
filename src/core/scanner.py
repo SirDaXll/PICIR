@@ -1,8 +1,23 @@
 import nmap
 import sqlite3
 import os
+import socket
 from datetime import datetime
 from core.constants import DB_NAME
+
+
+def check_internet_connection():
+    """Verifica si hay conexión a internet intentando conectarse a un servidor confiable.
+    
+    Returns:
+        bool: True si hay conexión a internet, False en caso contrario.
+    """
+    try:
+        # Intentar conectarse a Google DNS
+        socket.create_connection(("8.8.8.8", 53), timeout=3)
+        return True
+    except OSError:
+        return False
 
 
 class NmapScanner:
@@ -15,13 +30,14 @@ class NmapScanner:
             return False  # No estamos en Unix/Linux
 
     @staticmethod
-    def scan_target(target, scan_type, result_callback=None):
+    def scan_target(target, scan_type, result_callback=None, options=None):
         """Realiza un escaneo de red con Nmap.
 
         Args:
             target: IP o rango de IPs a escanear
             scan_type: Tipo de escaneo ("TCP" o "UDP")
             result_callback: Función opcional para recibir actualizaciones
+            options: Lista de opciones adicionales de nmap (ejemplo: ["-sV", "-O", "--script vulners"])
 
         Returns:
             Diccionario con los resultados del escaneo o None si no se encontraron hosts
@@ -29,35 +45,43 @@ class NmapScanner:
         # Verificar privilegios de root
         has_root = NmapScanner._has_root_privileges()
         
-        # Base de opciones para el escaneo
-        base_options = "-T5 --script vulners"
+        # Si se va a usar el script vulners, verificar conexión a internet
+        if options and "--script vulners" in options:
+            if not check_internet_connection():
+                if result_callback:
+                    result_callback(
+                        "⚠️ No hay conexión a internet. "
+                        "El escaneo de vulnerabilidades será omitido."
+                    )
+                # Remover script vulners de las opciones
+                options = [opt for opt in options if opt != "--script vulners"]
         
-        # Configurar opciones según privilegios y tipo de escaneo
-        if has_root:
-            if scan_type == "UDP":
-                options = f"-sUV -O {base_options}"  # UDP con detección de versión y SO
-            else:
-                options = f"-sV -O {base_options}"   # TCP con detección de versión y SO
-        else:
+        if not has_root and ("-O" in (options or []) or "-sU" in (options or [])):
             if result_callback:
                 result_callback(
                     "⚠️ No se tienen privilegios de root. "
-                    "El escaneo de sistema operativo será omitido."
+                    "El escaneo de sistema operativo y UDP será omitido."
                 )
-            if scan_type == "UDP":
-                options = f"-sUV {base_options}"  # UDP con detección de versión
-            else:
-                options = f"-sV {base_options}"   # TCP con detección de versión
+            # Remover opciones que requieren root
+            if options:
+                options = [opt for opt in options if opt not in ["-O", "-sU"]]
+        
+        # Si se proporcionaron opciones, usarlas directamente
+        if options:
+            scan_options = " ".join(options)
+        else:
+            # Usar opciones por defecto si no se proporcionaron
+            scan_options = "-sV -T5"
             
         start_time = datetime.now()
         
         if result_callback:
             result_callback(f"Iniciando escaneo {scan_type} para: {target}")
-            result_callback(f"Argumentos de Nmap: {options}")
+            result_callback(f"Argumentos de Nmap: {scan_options}")
 
         try:
             scanner = nmap.PortScanner()
-            scanner.scan(target, arguments=options)
+            scanner.scan(target, arguments=scan_options)
 
             if not scanner.all_hosts():
                 if result_callback:
@@ -71,7 +95,7 @@ class NmapScanner:
                 'scanner': scanner,
                 'start_time': start_time,
                 'response_time': tiempo_respuesta,
-                'command': options,
+                'command': ' '.join(options) if options else '',  # Convert list to string
                 'has_root': has_root
             }
 
@@ -95,6 +119,8 @@ class ScanResultProcessor:
             "cerrado": 0,
             "abierto|filtrado": 0
         }
+        # Comprobar si el script vulners está en las opciones de escaneo
+        self.vulners_enabled = '--script vulners' in (self.scan_results.get('command', '') or '')
 
     def process_results(self):
         """Procesa y guarda los resultados del escaneo en la base de datos."""
@@ -252,5 +278,7 @@ class ScanResultProcessor:
                     if count > 0:
                         state_name = state_names.get(state, state)
                         self.result_callback(f"Puertos {state_name}: {count}")
-                self.result_callback(f"Vulnerabilidades detectadas: {total_vulns}")
-                self.result_callback(f"Vulnerabilidades explotables: {total_exploitable}")
+                # Solo mostrar el resumen de vulnerabilidades si el script vulners estaba habilitado
+                if self.vulners_enabled:
+                    self.result_callback(f"Vulnerabilidades detectadas: {total_vulns}")
+                    self.result_callback(f"Vulnerabilidades explotables: {total_exploitable}")

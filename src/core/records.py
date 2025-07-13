@@ -28,7 +28,8 @@ class RecordManager:
                         eh.direccion_mac,
                         eh.sistema_operativo,
                         COUNT(DISTINCT ep.puerto) as total_puertos,
-                        COUNT(DISTINCT v.id_vulnerabilidad) as total_vulnerabilidades
+                        COUNT(DISTINCT v.id_vulnerabilidad) as total_vulnerabilidades,
+                        COUNT(DISTINCT CASE WHEN v.explotable THEN v.id_vulnerabilidad END) as vulnerabilidades_explotables
                     FROM escaneos e
                     LEFT JOIN escaneos_host eh ON e.id = eh.id_escaneo
                     LEFT JOIN escaneos_puertos ep ON eh.id_escaneo = ep.id_escaneo
@@ -65,7 +66,8 @@ class RecordManager:
                         "mac_address": record[3] or "No detectada",
                         "sistema_operativo": record[4] or "No detectado",
                         "puertos_abiertos": record[5] or 0,
-                        "vulnerabilidades": record[6] or 0
+                        "vulnerabilidades": record[6] or 0,
+                        "vulnerabilidades_explotables": record[7] or 0
                     }
                     for record in records
                 ]
