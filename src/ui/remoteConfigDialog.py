@@ -3,10 +3,12 @@ Diálogo para configurar la conexión remota a la base de datos.
 """
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                             QLineEdit, QPushButton, QMessageBox)
+                             QLineEdit, QPushButton, QMessageBox, QWidget)
 from PySide6.QtCore import Signal, QRegularExpression
-from PySide6.QtGui import QRegularExpressionValidator
+from PySide6.QtGui import QRegularExpressionValidator, QIcon
 import paramiko
+import os
+from styles.themes import DARK_THEME, LIGHT_THEME
 
 class RemoteConfigDialog(QDialog):
     connection_established = Signal()
@@ -16,7 +18,39 @@ class RemoteConfigDialog(QDialog):
         self.setWindowTitle("Configuración de conexión remota")
         self.setMinimumWidth(400)
         self.remote_manager = None  # Será establecido por MainWindow
+
+        # Establecer el ícono de la aplicación
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "icons", "app.svg")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+
         self._setup_ui()
+        
+        # Aplicar el tema actual del padre si existe
+        if parent and hasattr(parent, 'current_theme'):
+            self.apply_theme(parent.current_theme)
+    
+    def apply_theme(self, theme):
+        """Aplica el tema especificado al diálogo y todos sus widgets"""
+        style = DARK_THEME if theme == "dark" else LIGHT_THEME
+        
+        # Aplicar tema al diálogo principal
+        self.setStyleSheet(style)
+        
+        # Aplicar tema a cada tipo específico de widget
+        for line_edit in self.findChildren(QLineEdit):
+            line_edit.setStyleSheet(style)
+        
+        for button in self.findChildren(QPushButton):
+            button.setStyleSheet(style)
+            
+        for label in self.findChildren(QLabel):
+            label.setStyleSheet(style)
+            
+        # Aplicar a cualquier otro widget que pueda existir
+        for widget in self.findChildren(QWidget):
+            if not isinstance(widget, (QLineEdit, QPushButton, QLabel)):
+                widget.setStyleSheet(style)
         
     def set_remote_manager(self, manager):
         """Establece el gestor de conexión remota"""

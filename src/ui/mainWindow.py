@@ -1,9 +1,11 @@
 from PySide6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
                              QWidget, QPushButton, QLineEdit, QTextEdit, QComboBox,
                              QLabel, QFrame, QTabWidget, QTableWidget, QTableWidgetItem, 
-                             QHeaderView, QMessageBox, QAbstractItemView)
-from PySide6.QtGui import QPalette, QRegularExpressionValidator, QIcon
-from PySide6.QtCore import QRegularExpression, Qt
+                             QHeaderView, QMessageBox, QAbstractItemView, QDialog,
+                             QTreeWidget, QTabBar, QSpinBox, QDateEdit)
+from PySide6.QtGui import (QRegularExpressionValidator, QIcon, QCursor,
+                           QPalette, QColor)
+from PySide6.QtCore import QRegularExpression, Qt, QSize
 from core.constants import DEFAULT_TARGET
 from core.scanner import NmapScanner, ScanResultProcessor
 from core.records import RecordManager
@@ -25,19 +27,52 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("PICIR")
         self.setGeometry(100, 100, 800, 600)
         
+        # Habilitar minimizar/maximizar
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowMinMaxButtonsHint |
+            Qt.WindowType.WindowCloseButtonHint
+        )
+        
+        # Establecer el ícono de la aplicación
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "icons", "app.svg")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+        
         # Lista para mantener referencias a las ventanas de detalles
         self.detailWindows = []
         
         # Gestor de conexión remota
         self.remote_manager = RemoteDBManager()
         
-        # Detectar tema del sistema
-        app = QApplication.instance()
-        if isinstance(app, QApplication):
-            self.isDarkTheme = app.palette().color(QPalette.ColorRole.Window).lightness() < 128
-        else:
-            self.isDarkTheme = False  # Default to light theme if app is None
-        self.setStyleSheet(DARK_THEME if self.isDarkTheme else LIGHT_THEME)
+        # Path base para los iconos
+        self.icons_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "icons")
+        
+        # Inicializar con tema claro por defecto
+        self.current_theme = "light"
+        self.setStyleSheet(LIGHT_THEME)
+        
+        # Crear el botón de tema como un QPushButton con solo icono
+        self.theme_button = QPushButton()
+        self.theme_button.setFixedSize(32, 32)
+        self.theme_button.setIconSize(QSize(24, 24))
+        self.theme_button.clicked.connect(self.toggle_theme)
+        self.theme_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.theme_button.setStyleSheet("""
+            QPushButton {
+                border: none;
+                background: transparent;
+                padding: 4px;
+            }
+            QPushButton:hover {
+                background: rgba(128, 128, 128, 0.2);
+                border-radius: 16px;
+            }
+        """)
+        
+        # Actualizar el tema inicial y el icono
+        self.current_theme = "light"
+        self.update_theme_button()
 
         self._setup_ui()
 
@@ -68,23 +103,18 @@ class MainWindow(QMainWindow):
     def _setup_top_bar(self, main_layout):
         top_bar = QHBoxLayout()
         
-        # Selector de tema
-        theme_label = QLabel("Tema:")
-        self.themeCombo = QComboBox()
-        self.themeCombo.setObjectName("themeSelector")
-        self.themeCombo.addItems(["Sistema", "Claro", "Oscuro"])
-        self.themeCombo.setCurrentText("Sistema")
-        self.themeCombo.currentTextChanged.connect(self.change_theme)
-        top_bar.addWidget(theme_label)
-        top_bar.addWidget(self.themeCombo)
+        # Lado izquierdo: Botón de tema
+        top_bar.addWidget(self.theme_button)
         
-        # Botón de sincronización remota
+        # Espacio flexible en el medio
+        top_bar.addStretch()
+        
+        # Lado derecho: Botón de sincronización remota
         self.remoteButton = QPushButton(" Conexión remota")
         self.remoteButton.setIcon(QIcon.fromTheme("network-server"))
         self.remoteButton.clicked.connect(self.show_remote_config)
         top_bar.addWidget(self.remoteButton)
         
-        top_bar.addStretch()
         main_layout.addLayout(top_bar)
 
     def _setup_scan_tab(self):
@@ -321,6 +351,7 @@ class MainWindow(QMainWindow):
             
             # Crear el diálogo
             dialog = DatePickerDialog(available_dates, self)
+            self._configure_dialog(dialog)
             dialog.date_selected.connect(self.on_date_selected)
             
             # Calcular la posición para el diálogo
@@ -342,17 +373,35 @@ class MainWindow(QMainWindow):
         # Actualizar la búsqueda
         self.search_records()
 
-    def change_theme(self, theme):
-        if theme == "Sistema":
-            app = QApplication.instance()
-            if isinstance(app, QApplication):
-                self.isDarkTheme = app.palette().color(QPalette.ColorRole.Window).lightness() < 128
-            else:
-                self.isDarkTheme = False
+    def update_theme_button(self):
+        """Actualiza el icono y tooltip del botón según el tema actual"""
+        if self.current_theme == "light":
+            icon_path = os.path.join(self.icons_path, "sun.svg")
+            tooltip = "Cambiar a tema oscuro"
         else:
-            self.isDarkTheme = theme == "Oscuro"
+            icon_path = os.path.join(self.icons_path, "moon.svg")
+            tooltip = "Cambiar a tema claro"
+
+        if os.path.exists(icon_path):
+            icon = QIcon(icon_path)
+            self.theme_button.setIcon(icon)
+            self.theme_button.setToolTip(tooltip)
+
+    def toggle_theme(self):
+        """Alterna entre tema claro y oscuro"""
+        if self.current_theme == "light":
+            self.current_theme = "dark"
+            self.setStyleSheet(DARK_THEME)
+        else:
+            self.current_theme = "light"
+            self.setStyleSheet(LIGHT_THEME)
         
-        self.setStyleSheet(DARK_THEME if self.isDarkTheme else LIGHT_THEME)
+        self.update_theme_button()
+
+        # Actualizar el tema en las ventanas de detalles abiertas
+        for window in self.detailWindows:
+            if not window.isHidden():
+                window.apply_theme(self.current_theme)
 
     def update_nmap_command(self):
         target = self.targetInput.text().strip() or DEFAULT_TARGET
@@ -496,16 +545,23 @@ class MainWindow(QMainWindow):
             scan_details = record_manager.get_scan_details(scan_id, host_ip)
             
             # Crear diálogo como ventana independiente
-            dialog = ScanDetailsDialog(scan_details)  # No pasamos el parent
+            dialog = ScanDetailsDialog(scan_details, self)  # Pasamos self como parent para heredar el tema
             dialog.setWindowTitle(f"Detalles del escaneo - {host_ip}")
             
             # Configurar como ventana independiente
             dialog.setWindowFlags(
-                dialog.windowFlags() | 
                 Qt.WindowType.Window |  # Hacer que sea una ventana independiente
-                Qt.WindowType.WindowSystemMenuHint |  # Agregar menú de sistema
-                Qt.WindowType.WindowMinMaxButtonsHint  # Permitir minimizar/maximizar
+                Qt.WindowType.WindowMinMaxButtonsHint |  # Permitir minimizar/maximizar
+                Qt.WindowType.WindowCloseButtonHint |  # Agregar botón de cerrar
+                Qt.WindowType.WindowSystemMenuHint  # Agregar menú de sistema
             )
+            
+            # Establecer tamaño inicial y heredar icono de la aplicación principal
+            dialog.setGeometry(100, 100, 800, 600)
+            dialog.setWindowIcon(self.windowIcon())
+            
+            # Aplicar el tema actual
+            dialog.apply_theme(self.current_theme)
             
             # Conectar la señal destroyed para limpieza automática
             dialog.destroyed.connect(lambda: self.detailWindows.remove(dialog) 
@@ -525,6 +581,8 @@ class MainWindow(QMainWindow):
             # Crear diálogo de configuración remota
             dialog = RemoteConfigDialog(self)
             dialog.setWindowTitle("Configuración Remota")
+            dialog.setWindowIcon(self.windowIcon())
+            dialog.apply_theme(self.current_theme)
             
             # Mostrar diálogo de forma modal
             dialog.exec_()
@@ -541,6 +599,7 @@ class MainWindow(QMainWindow):
                     self.remote_manager.sftp.stat('.')
                     # Si llegamos aquí, la conexión está activa
                     dialog = RemoteStatusDialog(self.remote_manager, self)
+                    self._configure_dialog(dialog)
                     dialog.exec_()
                     return
                 except Exception:
@@ -550,6 +609,7 @@ class MainWindow(QMainWindow):
             # No hay conexión o se perdió, mostrar diálogo de configuración
             dialog = RemoteConfigDialog(self)
             dialog.set_remote_manager(self.remote_manager)
+            self._configure_dialog(dialog)
             dialog.exec_()
             
         except Exception as e:
@@ -802,6 +862,7 @@ class MainWindow(QMainWindow):
             
             # Crear diálogo
             dialog = DatePickerDialog(available_dates, self)
+            self._configure_dialog(dialog)
             dialog.date_selected.connect(self._on_honeypot_date_selected)
             
             # Calcular posición para el diálogo
@@ -850,6 +911,14 @@ class MainWindow(QMainWindow):
         msg_box.setWindowTitle(title)
         msg_box.setText(f"{padded_message}\n")
         msg_box.setMinimumWidth(400)
+        
+        # Configurar el diálogo con el tema actual
+        self._configure_dialog(msg_box)
+        
+        # Asegurar que los botones estándar también reciben el estilo
+        for button in msg_box.buttons():
+            button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        
         msg_box.exec_()
 
     def _show_error(self, title: str, message: str):
@@ -879,3 +948,175 @@ class MainWindow(QMainWindow):
                 "Error",
                 f"Error al aplicar filtros: {str(e)}"
             )
+
+    def _configure_dialog(self, dialog):
+        """Configura un diálogo con el tema e icono actuales.
+        
+        Args:
+            dialog: El diálogo a configurar
+        """
+        # Establecer el icono de la aplicación
+        dialog.setWindowIcon(self.windowIcon())
+        
+        # Colores base según el tema
+        is_dark = self.current_theme == "dark"
+        bg_color = "#2b2b2b" if is_dark else "#f0f0f0"
+        text_color = "#ffffff" if is_dark else "#000000"
+        
+        # Crear paleta de colores para el tema
+        palette = QPalette()
+        bg = QColor(bg_color)
+        fg = QColor(text_color)
+        palette.setColor(QPalette.ColorRole.Window, bg)
+        palette.setColor(QPalette.ColorRole.WindowText, fg)
+        palette.setColor(QPalette.ColorRole.Base, QColor("#363636" if is_dark else "#ffffff"))
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#424242" if is_dark else "#f7f7f7"))
+        palette.setColor(QPalette.ColorRole.Text, fg)
+        palette.setColor(QPalette.ColorRole.Button, bg)
+        palette.setColor(QPalette.ColorRole.ButtonText, fg)
+        palette.setColor(QPalette.ColorRole.Highlight, QColor("#0d47a1" if is_dark else "#308cc6"))
+        palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
+
+        # Estilos específicos para cada tipo de widget
+        widget_styles = {
+            QPushButton: f"""
+                QPushButton {{
+                    background-color: {bg_color};
+                    color: {text_color};
+                    border: 1px solid {'#404040' if is_dark else '#c0c0c0'};
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    min-width: 80px;
+                }}
+                QPushButton:hover {{
+                    background-color: {'#404040' if is_dark else '#e0e0e0'};
+                }}
+                QPushButton:pressed {{
+                    background-color: {'#303030' if is_dark else '#d0d0d0'};
+                }}
+            """,
+            QLineEdit: f"""
+                QLineEdit {{
+                    background-color: {'#363636' if is_dark else '#ffffff'};
+                    color: {text_color};
+                    border: 1px solid {'#404040' if is_dark else '#c0c0c0'};
+                    border-radius: 4px;
+                    padding: 4px;
+                }}
+            """,
+            QTextEdit: f"""
+                QTextEdit {{
+                    background-color: {'#363636' if is_dark else '#ffffff'};
+                    color: {text_color};
+                    border: 1px solid {'#404040' if is_dark else '#c0c0c0'};
+                    border-radius: 4px;
+                    padding: 4px;
+                }}
+            """,
+            QComboBox: f"""
+                QComboBox {{
+                    background-color: {'#363636' if is_dark else '#ffffff'};
+                    color: {text_color};
+                    border: 1px solid {'#404040' if is_dark else '#c0c0c0'};
+                    border-radius: 4px;
+                    padding: 4px;
+                }}
+                QComboBox::drop-down {{
+                    border: none;
+                }}
+                QComboBox::down-arrow {{
+                    image: url({'down_arrow_white.png' if is_dark else 'down_arrow_black.png'});
+                    width: 12px;
+                    height: 12px;
+                }}
+            """,
+            QTableWidget: f"""
+                QTableWidget {{
+                    background-color: {'#363636' if is_dark else '#ffffff'};
+                    color: {text_color};
+                    gridline-color: {'#404040' if is_dark else '#d0d0d0'};
+                    border: 1px solid {'#404040' if is_dark else '#c0c0c0'};
+                }}
+                QHeaderView::section {{
+                    background-color: {bg_color};
+                    color: {text_color};
+                    padding: 4px;
+                    border: 1px solid {'#404040' if is_dark else '#c0c0c0'};
+                }}
+            """,
+            QTreeWidget: f"""
+                QTreeWidget {{
+                    background-color: {'#363636' if is_dark else '#ffffff'};
+                    color: {text_color};
+                    border: 1px solid {'#404040' if is_dark else '#c0c0c0'};
+                }}
+                QTreeWidget::item:hover {{
+                    background-color: {'#404040' if is_dark else '#e0e0e0'};
+                }}
+            """,
+            QLabel: f"color: {text_color}; background-color: transparent;",
+            QTabBar: f"""
+                QTabBar::tab {{
+                    background-color: {bg_color};
+                    color: {text_color};
+                    border: 1px solid {'#404040' if is_dark else '#c0c0c0'};
+                    padding: 8px 12px;
+                    margin-right: 2px;
+                }}
+                QTabBar::tab:selected {{
+                    background-color: {'#404040' if is_dark else '#e0e0e0'};
+                }}
+            """,
+            QSpinBox: f"""
+                QSpinBox {{
+                    background-color: {'#363636' if is_dark else '#ffffff'};
+                    color: {text_color};
+                    border: 1px solid {'#404040' if is_dark else '#c0c0c0'};
+                    border-radius: 4px;
+                    padding: 4px;
+                }}
+            """,
+            QDateEdit: f"""
+                QDateEdit {{
+                    background-color: {'#363636' if is_dark else '#ffffff'};
+                    color: {text_color};
+                    border: 1px solid {'#404040' if is_dark else '#c0c0c0'};
+                    border-radius: 4px;
+                    padding: 4px;
+                }}
+            """
+        }
+
+        # Si el diálogo tiene un método específico para aplicar el tema, usarlo primero
+        if hasattr(dialog, 'apply_theme'):
+            dialog.apply_theme(self.current_theme)
+
+        # Aplicar paleta al diálogo
+        dialog.setPalette(palette)
+
+        # Estilo base para el diálogo
+        dialog_style = f"""
+            QDialog, QMessageBox {{
+                background-color: {bg_color};
+                color: {text_color};
+            }}
+        """
+        dialog.setStyleSheet(dialog_style)
+
+        # Aplicar estilos específicos a los widgets hijos
+        for widget in dialog.findChildren(QWidget):
+            # Aplicar paleta a todos los widgets
+            widget.setPalette(palette)
+            
+            # Aplicar estilos específicos según el tipo de widget
+            for widget_class, style in widget_styles.items():
+                if isinstance(widget, widget_class):
+                    widget.setStyleSheet(style)
+                    break  # Una vez aplicado el estilo, pasar al siguiente widget
+                    
+            # Asegurarse de que los botones tengan el cursor correcto
+            if isinstance(widget, QPushButton):
+                widget.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+                
+        # Forzar actualización visual
+        dialog.update()

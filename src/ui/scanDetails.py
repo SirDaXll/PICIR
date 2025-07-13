@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QLabel, QWidget, QGridLayout, QHeaderView, QPushButton, QScrollArea,
     QMessageBox
 )
+from styles.themes import DARK_THEME, LIGHT_THEME
 
 # Constants for UI
 DISPLAY_ROLE = Qt.ItemDataRole.DisplayRole
@@ -92,7 +93,7 @@ class ScanDetailsDialog(QDialog):
         main_layout = QVBoxLayout(self)
         
         # Crear tabs para diferentes secciones
-        tab_widget = QTabWidget()
+        self.tab_widget = QTabWidget()
         
         # Tab de información general
         general_tab = QWidget()
@@ -302,15 +303,119 @@ class ScanDetailsDialog(QDialog):
             vulns_layout.addWidget(vulns_table)
         
         # Agregar tabs al widget principal
-        tab_widget.addTab(scroll_area, "ℹ️ Información general")
-        tab_widget.addTab(ports_tab, "🔌 Puertos")
-        tab_widget.addTab(vulns_tab, "⚠️ Vulnerabilidades")
+        self.tab_widget.addTab(scroll_area, "ℹ️ Información general")
+        self.tab_widget.addTab(ports_tab, "🔌 Puertos")
+        self.tab_widget.addTab(vulns_tab, "⚠️ Vulnerabilidades")
         
-        main_layout.addWidget(tab_widget)
+        main_layout.addWidget(self.tab_widget)
         
         # Botón de cerrar
         close_button = QPushButton("Cerrar")
         close_button.clicked.connect(self.accept)
         main_layout.addWidget(close_button)
+
+    def apply_theme(self, theme):
+        """Aplica el tema especificado al diálogo y sus widgets.
+        
+        Args:
+            theme (str): 'light' o 'dark'
+        """
+        is_dark = theme == 'dark'
+        bg_color = "#2b2b2b" if is_dark else "#f0f0f0"
+        text_color = "#ffffff" if is_dark else "#000000"
+        selection_color = "#404040" if is_dark else "#e0e0e0"
+        border_color = "#404040" if is_dark else "#c0c0c0"
+        
+        # Estilos para las tablas
+        table_style = f"""
+            QTableWidget {{
+                background-color: {bg_color};
+                color: {text_color};
+                border: 1px solid {border_color};
+                gridline-color: {border_color};
+                border-radius: 4px;
+            }}
+            QTableWidget::item {{
+                padding: 4px;
+                color: {text_color};
+            }}
+            QTableWidget::item:hover {{
+                background-color: {selection_color};
+            }}
+            QTableWidget::item:selected {{
+                background-color: {'#505050' if is_dark else '#d0d0d0'};
+            }}
+            QHeaderView::section {{
+                background-color: {bg_color};
+                color: {text_color};
+                padding: 4px;
+                border: 1px solid {border_color};
+            }}
+        """
+        
+        # Estilos para pestañas
+        tab_style = f"""
+            QTabWidget::pane {{
+                border: 1px solid {border_color};
+                background-color: {bg_color};
+                top: -1px;
+            }}
+            QTabBar::tab {{
+                background-color: {bg_color};
+                color: {text_color};
+                padding: 8px 12px;
+                border: 1px solid {border_color};
+                margin-right: 2px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {selection_color};
+            }}
+            QTabBar::tab:hover {{
+                background-color: {'#404040' if is_dark else '#e0e0e0'};
+            }}
+        """
+        
+        # Estilos para el scroll area
+        scroll_style = f"""
+            QScrollArea {{
+                background-color: {bg_color};
+                border: none;
+            }}
+            QScrollBar:vertical {{
+                background-color: {bg_color};
+                width: 12px;
+                margin: 0px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {'#505050' if is_dark else '#c0c0c0'};
+                min-height: 20px;
+                border-radius: 6px;
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+        """
+        
+        # Aplicar el tema base
+        self.setStyleSheet(DARK_THEME if is_dark else LIGHT_THEME)
+        
+        # Aplicar estilos específicos
+        self.tab_widget.setStyleSheet(tab_style)
+        
+        # Aplicar a todas las tablas
+        for table in self.findChildren(QTableWidget):
+            table.setStyleSheet(table_style)
+        
+        # Aplicar a todas las áreas de desplazamiento
+        for scroll in self.findChildren(QScrollArea):
+            scroll.setStyleSheet(scroll_style)
+            
+        # Aplicar a todas las etiquetas
+        for label in self.findChildren(QLabel):
+            label.setStyleSheet(f"color: {text_color}; background-color: transparent;")
+            
+        # Forzar actualización visual
+        self.update()
 
 

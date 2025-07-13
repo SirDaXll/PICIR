@@ -3,7 +3,10 @@ Diálogo para mostrar el estado de la conexión remota.
 """
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QPushButton, 
-                             QHBoxLayout, QMessageBox)
+                             QHBoxLayout, QMessageBox, QWidget)
+from PySide6.QtGui import QIcon
+import os
+from styles.themes import DARK_THEME, LIGHT_THEME
 
 class RemoteStatusDialog(QDialog):
     def __init__(self, remote_manager, parent=None):
@@ -11,15 +14,25 @@ class RemoteStatusDialog(QDialog):
         self.remote_manager = remote_manager
         self.setWindowTitle("Estado de conexión remota")
         self.setMinimumWidth(300)
+
+        # Establecer el ícono de la aplicación
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "icons", "app.svg")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+
         self._setup_ui()
         
+        # Aplicar el tema actual del padre si existe
+        if parent and hasattr(parent, 'current_theme'):
+            self.apply_theme(parent.current_theme)
+
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         
         # Mensaje de estado
-        status_label = QLabel("✅ Conectado al servidor remoto")
-        status_label.setStyleSheet("color: green; font-weight: bold;")
-        layout.addWidget(status_label)
+        self.status_label = QLabel("✅ Conectado al servidor remoto")
+        self.status_label.setStyleSheet("color: #2ecc71; font-weight: bold;")  # Verde compatible con ambos temas
+        layout.addWidget(self.status_label)
         
         # Botones
         button_layout = QHBoxLayout()
@@ -73,3 +86,27 @@ class RemoteStatusDialog(QDialog):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
+
+    def apply_theme(self, theme):
+        """Aplica el tema especificado al diálogo y todos sus widgets"""
+        style = DARK_THEME if theme == "dark" else LIGHT_THEME
+        
+        # Aplicar tema al diálogo principal
+        self.setStyleSheet(style)
+        
+        # Aplicar tema a cada tipo específico de widget
+        for button in self.findChildren(QPushButton):
+            button.setStyleSheet(style)
+            
+        for label in self.findChildren(QLabel):
+            if label != self.status_label:  # No aplicar al label de estado
+                label.setStyleSheet(style)
+        
+        # El label de estado siempre debe ser verde
+        if hasattr(self, 'status_label'):
+            self.status_label.setStyleSheet("""
+                color: #2ecc71;
+                font-weight: bold;
+                padding: 8px;
+                background: transparent;
+            """)

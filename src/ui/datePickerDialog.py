@@ -1,6 +1,7 @@
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QCalendarWidget, QPushButton
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QCalendarWidget, QPushButton, QWidget
 from PySide6.QtCore import QDate, Signal
 from typing import List
+from styles.themes import DARK_THEME, LIGHT_THEME
 
 
 class DatePickerDialog(QDialog):
@@ -15,6 +16,10 @@ class DatePickerDialog(QDialog):
             QDate.fromString(date, "yyyy-MM-dd") for date in available_dates
         }
         self.setup_ui()
+        
+        # Heredar el tema del padre si está disponible
+        if parent and hasattr(parent, 'current_theme'):
+            self.apply_theme(parent.current_theme)
 
     def setup_ui(self):
         """Configura la interfaz de usuario del diálogo."""
@@ -71,3 +76,16 @@ class DatePickerDialog(QDialog):
         """Emite una señal para mostrar todas las fechas."""
         self.date_selected.emit("")
         self.accept()
+
+    def apply_theme(self, theme):
+        """Aplica el tema especificado al diálogo y sus widgets"""
+        if theme == "dark":
+            style = DARK_THEME
+        else:
+            style = LIGHT_THEME
+            
+        self.setStyleSheet(style)
+        
+        # Aplicar el tema a todos los widgets hijos
+        for widget in self.findChildren(QWidget):
+            widget.setStyleSheet(style)

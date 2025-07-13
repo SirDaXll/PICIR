@@ -1,10 +1,11 @@
 """
-Diálogo para seleccionar un archivo SQLite desde una conexión SFTP.
+Diálogo para seleccionar base de datos desde una conexión SFTP.
 """
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QTreeWidget, QTreeWidgetItem)
 from PySide6.QtCore import Signal
+from styles.themes import DARK_THEME, LIGHT_THEME
 import os
 
 class RemoteFileSelector(QDialog):
@@ -15,12 +16,84 @@ class RemoteFileSelector(QDialog):
         self.remote_manager = remote_manager
         self.sftp = None
         self.current_path = "/"
-        self.setWindowTitle("Seleccionar archivo SQLite remoto")
+        self.setWindowTitle("Seleccionar base de datos remoto")
         self.setMinimumSize(500, 400)
         self._setup_ui()
+        
+        # Obtener el tema actual del padre si existe
+        if parent and hasattr(parent, 'current_theme'):
+            self.apply_theme(parent.current_theme)
+        else:
+            self.apply_theme('light')  # tema por defecto
+            
         self._init_sftp()
         self._populate_tree()
+
+    def apply_theme(self, theme):
+        """Aplica el tema especificado al diálogo y sus widgets.
         
+        Args:
+            theme (str): 'light' o 'dark'
+        """
+        is_dark = theme == 'dark'
+        bg_color = "#2b2b2b" if is_dark else "#f0f0f0"
+        text_color = "#ffffff" if is_dark else "#000000"
+        selection_color = "#404040" if is_dark else "#e0e0e0"
+        border_color = "#404040" if is_dark else "#c0c0c0"
+        
+        # Estilo para QTreeWidget
+        tree_style = f"""
+            QTreeWidget {{
+                background-color: {bg_color};
+                color: {text_color};
+                border: 1px solid {border_color};
+                border-radius: 4px;
+            }}
+            QTreeWidget::item {{
+                padding: 4px;
+            }}
+            QTreeWidget::item:hover {{
+                background-color: {selection_color};
+            }}
+            QTreeWidget::item:selected {{
+                background-color: {'#505050' if is_dark else '#d0d0d0'};
+            }}
+            QHeaderView::section {{
+                background-color: {bg_color};
+                color: {text_color};
+                padding: 4px;
+                border: 1px solid {border_color};
+            }}
+        """
+        
+        # Aplicar el tema base
+        self.setStyleSheet(DARK_THEME if is_dark else LIGHT_THEME)
+        
+        # Aplicar estilos específicos
+        self.tree.setStyleSheet(tree_style)
+        
+        # Asegurar que los botones y labels tienen el estilo correcto
+        button_style = f"""
+            QPushButton {{
+                background-color: {bg_color};
+                color: {text_color};
+                border: 1px solid {border_color};
+                border-radius: 4px;
+                padding: 6px 12px;
+                min-width: 80px;
+            }}
+            QPushButton:hover {{
+                background-color: {selection_color};
+            }}
+            QPushButton:pressed {{
+                background-color: {'#303030' if is_dark else '#d0d0d0'};
+            }}
+        """
+        
+        self.select_button.setStyleSheet(button_style)
+        self.cancel_button.setStyleSheet(button_style)
+        self.path_label.setStyleSheet(f"color: {text_color};")
+
     def _init_sftp(self):
         """Inicializa la conexión SFTP"""
         if not self.remote_manager.ssh:
