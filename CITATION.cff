@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "Si usas este software, por favor cita este repositorio como:"
+authors:
+- family-names: "Molina"
+  given-names: "Diego"
+title: "PICIR"
+version: 1.0.0
+license: "MIT"
+date-released: 2025-07-13
+url: "https://github.com/SirDaXll/PICIR"
