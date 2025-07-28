@@ -131,7 +131,8 @@ class RecordManager:
                         puerto,
                         protocolo,
                         descripcion,
-                        explotable
+                        explotable,
+                        cvss
                     FROM vulnerabilidades
                     WHERE id_escaneo = ? AND id_host = ?
                 """
@@ -162,7 +163,8 @@ class RecordManager:
                             "puerto": vuln[1],
                             "protocolo": vuln[2],
                             "descripcion": vuln[3],
-                            "explotable": bool(vuln[4])
+                            "explotable": bool(vuln[4]),
+                            "cvss": float(vuln[5]) if vuln[5] is not None else 0.0
                         }
                         for vuln in vulnerabilities
                     ]

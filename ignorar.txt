@@ -1,0 +1,45 @@
+def begin_scan(self):
+    """Ejecuta un escaneo con las opciones seleccionadas"""
+    options = []
+    if self.sV_check.isChecked():
+        options.append("-sV")  # Detección de versiones
+    if self.vulners_check.isChecked():
+        options.append("--script vulners")  # Detección de vulnerabilidades
+    
+    scanner = NmapScanner()
+    results = scanner.scan_target(
+        target=self.targetInput.text(),
+        options=options,
+        result_callback=self.update_results
+    )
+
+
+
+def get_honeypot_connections(self):
+    """Obtiene las conexiones detectadas por el honeypot"""
+    cursor = self.db.cursor()
+    cursor.execute("""
+        SELECT 
+            strftime('%Y-%m-%d %H:%M:%S', datetime(connection_timestamp, 'unixepoch')),
+            remote_host,
+            local_port,
+            connection_protocol
+        FROM connections 
+        ORDER BY connection_timestamp DESC
+    """)
+    return cursor.fetchall()
+
+
+
+
+def process_vulnerability(self, vuln_data):
+    """Procesa y categoriza una vulnerabilidad detectada"""
+    cvss_score = float(vuln_data.get('cvss', 0))
+    is_exploitable = cvss_score >= 7.0
+    
+    return {
+        'cvss': cvss_score,
+        'explotable': is_exploitable,
+        'descripcion': vuln_data['description'],
+        'referencias': vuln_data.get('references', [])
+    }

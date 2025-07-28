@@ -1,9 +1,8 @@
 from PySide6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
                              QWidget, QPushButton, QLineEdit, QTextEdit, QComboBox,
                              QLabel, QFrame, QTabWidget, QTableWidget, QTableWidgetItem, 
-                             QHeaderView, QMessageBox, QAbstractItemView, QDialog,
-                             QTreeWidget, QTabBar, QSpinBox, QDateEdit, QGroupBox,
-                             QCheckBox)
+                             QHeaderView, QMessageBox, QAbstractItemView, QTreeWidget,
+                             QCheckBox, QTabBar, QSpinBox, QDateEdit, QGroupBox)
 from PySide6.QtGui import (QRegularExpressionValidator, QIcon, QCursor,
                            QPalette, QColor)
 from PySide6.QtCore import QRegularExpression, Qt, QSize
@@ -775,19 +774,22 @@ class MainWindow(QMainWindow):
     def _load_honeypot_db(self, remote_path):
         """Carga una base de datos del honeypot desde la ruta remota especificada"""
         try:
-            # Crear directorio temporal si no existe
-            temp_dir = os.path.join(tempfile.gettempdir(), "picir_honeypot")
+            # Guardar la ruta remota para recargas posteriores
+            self._last_remote_path = remote_path
+            
+            # Crear directorio temporal en el home del usuario
+            user_home = os.path.expanduser("~")
+            temp_dir = os.path.join(user_home, ".picir", "temp")
             os.makedirs(temp_dir, exist_ok=True)
             
-            # Verificar que sea un archivo SQLite válido y tenga el nombre correcto
+            # Asegurarse de que solo el usuario actual tenga acceso al directorio
+            os.chmod(temp_dir, 0o700)
+            
+            # Verificar que sea un archivo SQLite válido
             filename = os.path.basename(remote_path)
-            name_without_ext = os.path.splitext(filename)[0].lower()
             
             if not self._is_sqlite_file(filename):
                 raise Exception("El archivo seleccionado no es una base de datos SQLite válida")
-                
-            if name_without_ext != "dionaea":
-                raise Exception("La base de datos seleccionada no es una base de datos válida del honeypot")
             
             # Generar nombre para archivo temporal local
             local_path = os.path.join(temp_dir, filename)
@@ -951,10 +953,18 @@ class MainWindow(QMainWindow):
         """Recarga los datos del honeypot desde la base de datos actual."""
         try:
             current_db = self.db_label.text()
-            if "No hay base de datos seleccionada" in current_db:
+            if "No seleccionada" in current_db or "seleccionar" in current_db.lower():
                 self._show_warning(
-                    "Advertencia",
-                    "Primero debe seleccionar una base de datos del honeypot"
+                    "No hay base de datos",
+                    "Debe seleccionar una base de datos primero"
+                )
+                return
+                
+            # Verificar conexión remota
+            if not self.remote_manager.is_connected():
+                self._show_warning(
+                    "Sin conexión",
+                    "No hay una conexión remota activa"
                 )
                 return
                 
@@ -963,8 +973,13 @@ class MainWindow(QMainWindow):
             self.honeypotDateFilterBtn.setText("Seleccionar fecha")
             
             # Recargar la base de datos actual
-            remote_path = current_db.replace("Base de datos: ", "")
-            self._load_honeypot_db(remote_path)
+            if hasattr(self, '_last_remote_path'):
+                self._load_honeypot_db(self._last_remote_path)
+            else:
+                self._show_warning(
+                    "Error",
+                    "No hay una base de datos cargada previamente para recargar"
+                )
             
         except Exception as e:
             self._show_error(

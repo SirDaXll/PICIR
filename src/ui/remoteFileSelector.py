@@ -111,6 +111,11 @@ class RemoteFileSelector(QDialog):
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Nombre", "Tipo"])
         self.tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        
+        # Ajustar ancho de columnas: Nombre (70%), Tipo (30%)
+        self.tree.setColumnWidth(0, int(self.width() * 0.7))  # Columna Nombre
+        self.tree.setColumnWidth(1, int(self.width() * 0.3))  # Columna Tipo
+        
         layout.addWidget(self.tree)
         
         # Botones
@@ -237,3 +242,11 @@ class RemoteFileSelector(QDialog):
         """Se llama cuando se acepta el diálogo"""
         self.cleanup()
         super().accept()
+
+    def resize_event(self, event):
+        """Mantiene las proporciones de las columnas al redimensionar la ventana"""
+        super().resizeEvent(event)
+        # Actualizar anchos de columna manteniendo la proporción 70/30
+        tree_width = self.tree.width()
+        self.tree.setColumnWidth(0, int(tree_width * 0.7))  # Columna Nombre
+        self.tree.setColumnWidth(1, int(tree_width * 0.3))  # Columna Tipo

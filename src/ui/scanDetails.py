@@ -41,7 +41,7 @@ class ScanDetailsDialog(QDialog):
 
     def handle_vulnerability_click(self, item):
         # Verificar si el ítem es de la columna de descripción
-        if item.column() == 3:  # columna de descripción
+        if item.column() == 4:  # columna de descripción
             text = item.text()
             # Buscar URLs en el texto (formato básico http:// o https://)
             if text.startswith(("http://", "https://")):
@@ -214,7 +214,7 @@ class ScanDetailsDialog(QDialog):
         else:
             # Crear y configurar la tabla de vulnerabilidades
             vulns_table = QTableWidget()
-            vulns_table.setColumnCount(4)
+            vulns_table.setColumnCount(5)  # Aumentamos a 5 columnas
             
             # Habilitar ordenamiento
             vulns_table.setSortingEnabled(True)
@@ -229,6 +229,9 @@ class ScanDetailsDialog(QDialog):
             exploitable_header = QTableWidgetItem("Explotable")
             exploitable_header.setIcon(QIcon.fromTheme("security-low"))
             
+            cvss_header = QTableWidgetItem("CVSS")
+            cvss_header.setIcon(QIcon.fromTheme("security-medium"))
+            
             description_header = QTableWidgetItem("Descripción")
             description_header.setIcon(QIcon.fromTheme("dialog-warning"))
             
@@ -236,7 +239,8 @@ class ScanDetailsDialog(QDialog):
             vulns_table.setHorizontalHeaderItem(1, vuln_port_header)
             vulns_table.setHorizontalHeaderItem(0, vuln_protocol_header)
             vulns_table.setHorizontalHeaderItem(2, exploitable_header)
-            vulns_table.setHorizontalHeaderItem(3, description_header)
+            vulns_table.setHorizontalHeaderItem(3, cvss_header)
+            vulns_table.setHorizontalHeaderItem(4, description_header)
             
             # Configurar el ancho de las columnas
             header = vulns_table.horizontalHeader()
@@ -251,11 +255,15 @@ class ScanDetailsDialog(QDialog):
             
             # Explotable
             header.setSectionResizeMode(2, INTERACTIVE_MODE)
-            vulns_table.setColumnWidth(2, 110)
+            vulns_table.setColumnWidth(2, 100)
+            
+            # CVSS
+            header.setSectionResizeMode(3, INTERACTIVE_MODE)
+            vulns_table.setColumnWidth(3, 80)
             
             # Descripción (con URLs clicables)
-            header.setSectionResizeMode(3, INTERACTIVE_MODE)
-            vulns_table.setColumnWidth(3, 390)
+            header.setSectionResizeMode(4, INTERACTIVE_MODE)
+            vulns_table.setColumnWidth(4, 320)
             
             # Configuraciones adicionales
             header.setStretchLastSection(True)
@@ -290,12 +298,28 @@ class ScanDetailsDialog(QDialog):
                     exploitable_item.setBackground(QColor(255, 200, 200))  # Rojo claro
                 vulns_table.setItem(row, 2, exploitable_item)
                 
+                # CVSS (ordenable numéricamente)
+                cvss_item = QTableWidgetItem()
+                cvss_score = vuln.get("cvss", 0.0)  # Obtener CVSS, 0.0 si no existe
+                cvss_item.setData(DISPLAY_ROLE, f"{cvss_score:.1f}")
+                cvss_item.setData(USER_ROLE, float(cvss_score))
+                # Colorear según la severidad del CVSS
+                if cvss_score >= 9.0:
+                    cvss_item.setBackground(QColor(255, 100, 100))  # Rojo más intenso
+                elif cvss_score >= 7.0:
+                    cvss_item.setBackground(QColor(255, 150, 150))  # Rojo medio
+                elif cvss_score >= 4.0:
+                    cvss_item.setBackground(QColor(255, 200, 150))  # Naranja claro
+                elif cvss_score > 0:
+                    cvss_item.setBackground(QColor(255, 255, 150))  # Amarillo claro
+                vulns_table.setItem(row, 3, cvss_item)
+                
                 # Crear ítem de descripción con URL clicable
                 desc_item = QTableWidgetItem(vuln["descripcion"])
                 if vuln["descripcion"].startswith(("http://", "https://")):
                     desc_item.setForeground(BLUE_COLOR)
                     desc_item.setToolTip("Haz clic para abrir en el navegador")
-                vulns_table.setItem(row, 3, desc_item)
+                vulns_table.setItem(row, 4, desc_item)
             
             # Reactivar ordenamiento
             vulns_table.setSortingEnabled(True)
@@ -337,7 +361,6 @@ class ScanDetailsDialog(QDialog):
             }}
             QTableWidget::item {{
                 padding: 4px;
-                color: {text_color};
             }}
             QTableWidget::item:hover {{
                 background-color: {selection_color};
@@ -406,6 +429,23 @@ class ScanDetailsDialog(QDialog):
         # Aplicar a todas las tablas
         for table in self.findChildren(QTableWidget):
             table.setStyleSheet(table_style)
+            
+            # Si es la tabla de vulnerabilidades (tiene 5 columnas)
+            if table.columnCount() == 5:
+                # Primero aplicar el color de texto por defecto a todas las celdas
+                for row in range(table.rowCount()):
+                    for col in range(table.columnCount()):
+                        item = table.item(row, col)
+                        if item:
+                            item.setForeground(QColor(text_color))
+                
+                # Luego aplicar el color azul solo a las URLs
+                for row in range(table.rowCount()):
+                    desc_item = table.item(row, 4)  # Columna de descripción
+                    if desc_item and desc_item.text().startswith(("http://", "https://")):
+                        # Usar un azul más brillante para modo oscuro y uno más oscuro para modo claro
+                        url_color = QColor(100, 181, 246) if is_dark else QColor(25, 118, 210)
+                        desc_item.setForeground(url_color)
         
         # Aplicar a todas las áreas de desplazamiento
         for scroll in self.findChildren(QScrollArea):
